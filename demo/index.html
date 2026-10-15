@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Worker Video Studio</title>
+    <meta
+      name="description"
+      content="A video editor whose playback, effects and timeline all run in a Web Worker, powered by html-video-element-webworker-polyfill."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237c5cff'/><path d='M12 9l12 7-12 7z' fill='white'/></svg>"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <div>
+          <h1>Worker Video Studio</h1>
+          <p>Playback, WebGL effects, picture-in-picture and the timeline are rendered in a Web Worker.</p>
+        </div>
+      </div>
+      <nav>
+        <a href="https://github.com/stepancar/html-video-element-webworker-polyfill">GitHub</a>
+        <a href="https://www.npmjs.com/package/html-video-element-webworker-polyfill">npm</a>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <section class="stage-panel">
+        <div class="stage">
+          <canvas id="stage" width="1280" height="720" aria-label="Rendered video"></canvas>
+          <div id="error" class="error" hidden></div>
+        </div>
+
+        <div class="transport">
+          <button id="play" class="icon-button" type="button" aria-label="Play">
+            <svg viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z" /></svg>
+            <svg viewBox="0 0 24 24" class="icon-pause"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+          </button>
+          <span id="time" class="time">0:00.0 / 0:00.0</span>
+          <label class="inline">
+            <input id="muted" type="checkbox" checked />
+            Muted
+          </label>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          <select id="rate" aria-label="Playback rate">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+
+        <div class="timeline" id="timeline-wrap">
+          <canvas id="timeline" width="1440" height="90" aria-label="Timeline"></canvas>
+          <div id="playhead" class="playhead"></div>
+          <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Seek" />
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="card">
+          <h2>Source</h2>
+          <div class="chips" id="sources"></div>
+          <label class="file">
+            <input id="file" type="file" accept="video/*" />
+            <span>Open a local video…</span>
+          </label>
+        </section>
+
+        <section class="card">
+          <h2>Effect <small>WebGL 2 in the worker</small></h2>
+          <div class="chips" id="effects"></div>
+        </section>
+
+        <section class="card">
+          <h2>Picture-in-picture <small>a second element</small></h2>
+          <div class="chips" id="pips"></div>
+        </section>
+
+        <section class="card stats">
+          <h2>Live stats</h2>
+          <dl>
+            <dt>Main-thread &lt;video&gt; elements</dt>
+            <dd id="stat-elements">0</dd>
+            <dt>Resolution</dt>
+            <dd id="stat-resolution">–</dd>
+            <dt>readyState</dt>
+            <dd id="stat-ready">0</dd>
+            <dt>VideoFrames received</dt>
+            <dd id="stat-frames">0</dd>
+            <dt>currentFrame.timestamp</dt>
+            <dd id="stat-timestamp">–</dd>
+            <dt>Worker renders / s</dt>
+            <dd id="stat-fps">0</dd>
+            <dt>Timeline thumbnails</dt>
+            <dd id="stat-thumbs">0</dd>
+          </dl>
+        </section>
+      </aside>
+    </main>
+
+    <section class="code">
+      <h2>How it works</h2>
+      <div class="code-grid">
+        <div>
+          <h3>main.ts</h3>
+          <pre><code>import { createVideoHost } from "html-video-element-webworker-polyfill/host";
+
+const worker = new Worker(new URL("./render.worker.ts", import.meta.url), { type: "module" });
+createVideoHost(worker);
+
+const canvas = document.querySelector("canvas").transferControlToOffscreen();
+worker.postMessage({ canvas }, [canvas]);</code></pre>
+        </div>
+        <div>
+          <h3>render.worker.ts</h3>
+          <pre><code>import { polyfillDocument } from "html-video-element-webworker-polyfill/worker";
+import { polyfillWebglAPI } from "html-video-element-webworker-polyfill/webgl";
+polyfillDocument();
+polyfillWebglAPI();
+
+const video = document.createElement("video");
+video.src = "https://…/big-buck-bunny.webm";
+video.addEventListener("seeked", render);
+video.requestVideoFrameCallback(function onFrame() {
+  render();
+  video.requestVideoFrameCallback(onFrame);
+});
+
+function render() {
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}</code></pre>
+        </div>
+      </div>
+      <p class="credits">
+        Sample films: <em>Big Buck Bunny</em> and <em>Sintel</em> © Blender Foundation, CC BY 3.0, streamed from
+        Wikimedia Commons.
+      </p>
+    </section>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
