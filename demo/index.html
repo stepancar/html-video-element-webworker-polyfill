@@ -3,37 +3,71 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Worker Video Studio</title>
+    <title>HTMLVideoElement in a Web Worker</title>
     <meta
       name="description"
-      content="A video editor whose playback, effects and timeline all run in a Web Worker, powered by html-video-element-webworker-polyfill."
+      content="Create and control a video element from a Web Worker and read its decoded frames there, with every format the browser can play."
     />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237c5cff'/><path d='M12 9l12 7-12 7z' fill='white'/></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235b45e0'/><path d='M12 9l12 7-12 7z' fill='white'/></svg>"
     />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <header class="top">
-      <div class="brand">
-        <span class="logo" aria-hidden="true"></span>
-        <div>
-          <h1>Worker Video Studio</h1>
-          <p>Playback, WebGL effects, picture-in-picture and the timeline are rendered in a Web Worker.</p>
-        </div>
+    <header class="hero">
+      <p class="eyebrow">html-video-element-webworker-polyfill</p>
+      <h1>HTMLVideoElement in a Web Worker</h1>
+      <p class="lead">
+        Create and control a <code>&lt;video&gt;</code> from a Web Worker and read its decoded frames there. Any format
+        the browser can play, no demuxing, and the main thread stays free.
+      </p>
+      <div class="links">
+        <a class="button primary" href="https://github.com/stepancar/html-video-element-webworker-polyfill">GitHub</a>
+        <a class="button" href="https://www.npmjs.com/package/html-video-element-webworker-polyfill">npm</a>
+        <a
+          class="stackblitz"
+          href="https://stackblitz.com/github/stepancar/html-video-element-webworker-polyfill/tree/main/examples/stackblitz?file=worker.js&initialPath=/index.html&startScript=start"
+          target="_blank"
+          rel="noopener"
+        >
+          <img alt="Open in StackBlitz" src="https://developer.stackblitz.com/img/open_in_stackblitz.svg" />
+        </a>
       </div>
-      <nav>
-        <a href="https://github.com/stepancar/html-video-element-webworker-polyfill">GitHub</a>
-        <a href="https://www.npmjs.com/package/html-video-element-webworker-polyfill">npm</a>
-      </nav>
     </header>
 
-    <main class="layout">
-      <section class="stage-panel">
-        <div class="stage">
-          <canvas id="stage" width="1280" height="720" aria-label="Rendered video"></canvas>
-          <div id="error" class="error" hidden></div>
+    <main>
+      <section class="demo" aria-labelledby="demo-title">
+        <h2 id="demo-title" class="visually-hidden">Live demo</h2>
+
+        <div class="pipeline">
+          <figure class="panel">
+            <figcaption>
+              <span class="tag main">Main thread</span>
+              <strong>The real &lt;video&gt;</strong>
+              <span>Created, played and seeked by the worker.</span>
+            </figcaption>
+            <div class="screen" id="video-slot"></div>
+          </figure>
+
+          <div class="arrow" aria-hidden="true">
+            <svg viewBox="0 0 48 24"><path d="M2 12h40M34 4l8 8-8 8" /></svg>
+            <span>VideoFrame</span>
+          </div>
+
+          <figure class="panel">
+            <figcaption>
+              <span class="tag" id="output-tag">Web Worker</span>
+              <strong id="output-title">Frames processed in the worker</strong>
+              <span id="output-subtitle">Pulled with requestVideoFrameCallback, filtered pixel by pixel in JS.</span>
+            </figcaption>
+            <div class="screen">
+              <canvas id="worker-canvas" aria-label="Frames processed in the worker"></canvas>
+              <canvas id="main-canvas" aria-label="Frames processed on the main thread" hidden></canvas>
+              <div id="error" class="error" hidden></div>
+            </div>
+            <p class="metric" id="process-metric">–</p>
+          </figure>
         </div>
 
         <div class="transport">
@@ -41,108 +75,121 @@
             <svg viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z" /></svg>
             <svg viewBox="0 0 24 24" class="icon-pause"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
           </button>
-          <span id="time" class="time">0:00.0 / 0:00.0</span>
-          <label class="inline">
-            <input id="muted" type="checkbox" checked />
-            Muted
-          </label>
-          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
-          <select id="rate" aria-label="Playback rate">
-            <option value="0.5">0.5×</option>
-            <option value="1" selected>1×</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-          </select>
+          <input id="seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="Seek" />
+          <span id="time" class="time">0:00 / 0:00</span>
         </div>
 
-        <div class="timeline" id="timeline-wrap">
-          <canvas id="timeline" width="1440" height="90" aria-label="Timeline"></canvas>
-          <div id="playhead" class="playhead"></div>
-          <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Seek" />
+        <div class="controls">
+          <fieldset>
+            <legend>Process frames on</legend>
+            <div class="segmented" id="mode">
+              <button type="button" data-mode="worker" aria-pressed="true">Web Worker</button>
+              <button type="button" data-mode="main" aria-pressed="false">Main thread</button>
+            </div>
+            <p class="hint" id="mode-hint"></p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Extra CPU work per frame: <output id="work-value">25 ms</output></legend>
+            <input id="work" type="range" min="0" max="60" step="5" value="25" />
+            <p class="hint">Simulates a heavy per-frame algorithm.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Filter</legend>
+            <div class="chips" id="effects"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Video</legend>
+            <div class="chips" id="sources"></div>
+            <label class="file">
+              <input id="file" type="file" accept="video/*" />
+              <span>Open a local file…</span>
+            </label>
+          </fieldset>
+        </div>
+
+        <div class="monitor">
+          <div class="monitor-head">
+            <strong>Main thread smoothness</strong>
+            <span id="fps">–</span>
+          </div>
+          <canvas id="monitor" height="72" aria-label="Main thread frame times"></canvas>
+          <p class="hint">
+            Each bar is one main-thread animation frame. Tall red bars are frames the page could not render in time.
+          </p>
         </div>
       </section>
 
-      <aside class="side">
-        <section class="card">
-          <h2>Source</h2>
-          <div class="chips" id="sources"></div>
-          <label class="file">
-            <input id="file" type="file" accept="video/*" />
-            <span>Open a local video…</span>
-          </label>
-        </section>
-
-        <section class="card">
-          <h2>Effect <small>WebGL 2 in the worker</small></h2>
-          <div class="chips" id="effects"></div>
-        </section>
-
-        <section class="card">
-          <h2>Picture-in-picture <small>a second element</small></h2>
-          <div class="chips" id="pips"></div>
-        </section>
-
-        <section class="card stats">
-          <h2>Live stats</h2>
-          <dl>
-            <dt>Main-thread &lt;video&gt; elements</dt>
-            <dd id="stat-elements">0</dd>
-            <dt>Resolution</dt>
-            <dd id="stat-resolution">–</dd>
-            <dt>readyState</dt>
-            <dd id="stat-ready">0</dd>
-            <dt>VideoFrames received</dt>
-            <dd id="stat-frames">0</dd>
-            <dt>currentFrame.timestamp</dt>
-            <dd id="stat-timestamp">–</dd>
-            <dt>Worker renders / s</dt>
-            <dd id="stat-fps">0</dd>
-            <dt>Timeline thumbnails</dt>
-            <dd id="stat-thumbs">0</dd>
-          </dl>
-        </section>
-      </aside>
-    </main>
-
-    <section class="code">
-      <h2>How it works</h2>
-      <div class="code-grid">
-        <div>
-          <h3>main.ts</h3>
-          <pre><code>import { createVideoHost } from "html-video-element-webworker-polyfill/host";
-
-const worker = new Worker(new URL("./render.worker.ts", import.meta.url), { type: "module" });
-createVideoHost(worker);
-
-const canvas = document.querySelector("canvas").transferControlToOffscreen();
-worker.postMessage({ canvas }, [canvas]);</code></pre>
+      <section class="why" aria-labelledby="why-title">
+        <h2 id="why-title">Why not just WebCodecs?</h2>
+        <p>
+          WebCodecs gives you a decoder, not a player. <code>HTMLVideoElement</code> already does everything around it,
+          and for frame processing that is usually exactly what you need. Its only problem is that it does not exist in
+          workers. This package fixes that.
+        </p>
+        <div class="compare">
+          <div class="card">
+            <h3><code>VideoDecoder</code> (WebCodecs)</h3>
+            <ul>
+              <li>You demux every container yourself (mp4box.js, a WebM parser, …).</li>
+              <li>You configure codecs, feed chunks and manage decoder queues.</li>
+              <li>Seeking means finding keyframes and decoding forward to the target time.</li>
+              <li>Streaming, range requests and buffering are up to you.</li>
+            </ul>
+          </div>
+          <div class="card accent">
+            <h3><code>&lt;video&gt;</code> in a worker (this package)</h3>
+            <ul>
+              <li>Every format the browser plays: MP4, WebM, MOV, MSE streams, HLS where supported.</li>
+              <li>No demuxing: set <code>src</code>, then <code>play()</code> or set <code>currentTime</code>.</li>
+              <li>Frame-accurate <code>seeked</code> with the decoded frame ready in the handler.</li>
+              <li>Frames reach the worker as zero-copy <code>VideoFrame</code>s for Canvas, WebGL or WebGPU.</li>
+            </ul>
+          </div>
         </div>
-        <div>
-          <h3>render.worker.ts</h3>
-          <pre><code>import { polyfillDocument } from "html-video-element-webworker-polyfill/worker";
-import { polyfillWebglAPI } from "html-video-element-webworker-polyfill/webgl";
+      </section>
+
+      <section class="how" aria-labelledby="how-title">
+        <h2 id="how-title">How it works</h2>
+        <p>
+          The main thread keeps the real element. The worker gets an object with the same API: properties and calls are
+          forwarded over <code>postMessage</code>, state and events come back, and every decoded frame is transferred as
+          a <code>VideoFrame</code>. The worker keeps the current frame, so it can read it synchronously.
+        </p>
+        <div class="code-grid">
+          <div>
+            <h3>main.js</h3>
+            <pre><code class="language-javascript">import { createVideoHost } from "html-video-element-webworker-polyfill/host";
+
+const worker = new Worker("./worker.js", { type: "module" });
+createVideoHost(worker);</code></pre>
+          </div>
+          <div>
+            <h3>worker.js</h3>
+            <pre><code class="language-javascript">import { polyfillDocument } from "html-video-element-webworker-polyfill/worker";
+import { polyfill2dCanvasApi } from "html-video-element-webworker-polyfill/canvas2d";
+
 polyfillDocument();
-polyfillWebglAPI();
+polyfill2dCanvasApi();
 
 const video = document.createElement("video");
-video.src = "https://…/big-buck-bunny.webm";
-video.addEventListener("seeked", render);
-video.requestVideoFrameCallback(function onFrame() {
-  render();
-  video.requestVideoFrameCallback(onFrame);
-});
-
-function render() {
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-}</code></pre>
+video.src = "movie.mp4";
+video.currentTime = 12;
+video.addEventListener("seeked", () => {
+  ctx.drawImage(video, 0, 0);
+  const pixels = ctx.getImageData(0, 0, w, h);
+});</code></pre>
+          </div>
         </div>
-      </div>
-      <p class="credits">
-        Sample films: <em>Big Buck Bunny</em> and <em>Sintel</em> © Blender Foundation, CC BY 3.0, streamed from
-        Wikimedia Commons.
-      </p>
-    </section>
+      </section>
+    </main>
+
+    <footer>
+      Sample films: <em>Big Buck Bunny</em> and <em>Sintel</em> © Blender Foundation, CC BY 3.0, streamed from Wikimedia
+      Commons.
+    </footer>
 
     <script type="module" src="./main.ts"></script>
   </body>

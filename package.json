@@ -96,6 +96,7 @@
     "@vitest/browser": "^5.0.4",
     "@vitest/browser-playwright": "^5.0.4",
     "@webgpu/types": "^0.1.74",
+    "highlight.js": "^11.12.0",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "playwright": "^1.64.0",

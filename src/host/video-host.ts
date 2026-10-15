@@ -37,6 +37,9 @@ const SILENT_STATE_POLLS = 32;
 interface Entry {
   video: HTMLVideoElement;
   frameCallback: number | null;
+  frameInFlight: boolean;
+  pendingFrame: { frame: VideoFrame; metadata: FrameMetadata } | null;
+  sendPendingFrame: () => void;
   lastFrameTimestamp: number | null;
   frameDuration: number | null;
   detach: () => void;
@@ -123,6 +126,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       video,
       frameCallback: null,
       lastFrameTimestamp: null,
+      frameInFlight: false,
+      pendingFrame: null,
+      sendPendingFrame: () => {},
       frameDuration: null,
       detach: () => {},
     };
@@ -148,7 +154,26 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       return frame.timestamp !== entry.lastFrameTimestamp;
     };
 
+    const dropPendingFrame = (): void => {
+      entry.pendingFrame?.frame.close();
+      entry.pendingFrame = null;
+    };
+
+    const sendFrame = (frame: VideoFrame, metadata: FrameMetadata): void => {
+      entry.frameInFlight = true;
+      post({ kind: "frame", id, ack, state: snapshot(video), frame, metadata }, [frame]);
+    };
+
+    entry.sendPendingFrame = () => {
+      entry.frameInFlight = false;
+      const pending = entry.pendingFrame;
+      if (!pending) return;
+      entry.pendingFrame = null;
+      sendFrame(pending.frame, pending.metadata);
+    };
+
     const sendEvent = (type: string, frame: VideoFrame | null): void => {
+      if (frame || type === "emptied") dropPendingFrame();
       if (!frame) {
         if (type === "emptied") entry.lastFrameTimestamp = null;
         post({ kind: "event", id, ack, type, state: snapshot(video) });
@@ -208,13 +233,19 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
         return;
       }
       noteFrame(frame);
-      post({ kind: "frame", id, ack, state: snapshot(video), frame, metadata: toMetadata(metadata) }, [frame]);
+      if (entry.frameInFlight) {
+        dropPendingFrame();
+        entry.pendingFrame = { frame, metadata: toMetadata(metadata) };
+      } else {
+        sendFrame(frame, toMetadata(metadata));
+      }
     };
     if (typeof video.requestVideoFrameCallback === "function") {
       entry.frameCallback = video.requestVideoFrameCallback(onFrame);
     }
 
     entry.detach = () => {
+      dropPendingFrame();
       for (const type of MEDIA_EVENTS) video.removeEventListener(type, onEvent);
       if (entry.frameCallback !== null) video.cancelVideoFrameCallback(entry.frameCallback);
       if (held) clearTimeout(held.timer);
@@ -248,6 +279,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     switch (message.kind) {
       case "hello":
         welcome();
+        return;
+      case "frameAck":
+        entries.get(message.id)?.sendPendingFrame();
         return;
       case "canPlayType":
         post({ kind: "result", callId: message.callId, value: probeCanPlayType(message.type) });

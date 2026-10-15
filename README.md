@@ -24,6 +24,16 @@ transferred to the worker as a `VideoFrame`. The worker keeps the current frame,
 **[Live demo →](https://stepancar.github.io/html-video-element-webworker-polyfill/)** — a small video editor whose
 playback, WebGL effects, picture-in-picture and timeline thumbnails are all rendered in a worker.
 
+**[Open the minimal example in StackBlitz →](https://stackblitz.com/github/stepancar/html-video-element-webworker-polyfill/tree/main/examples/stackblitz?file=worker.js&initialPath=/index.html&startScript=start)**
+
+## Why not WebCodecs?
+
+WebCodecs gives you a decoder, not a player. With `VideoDecoder` you demux every container yourself (mp4box.js, a
+WebM parser, …), configure codecs, feed chunks, find keyframes to seek and handle streaming and buffering.
+`HTMLVideoElement` already does all of that for every format the browser can play — MP4, WebM, MOV, MSE streams, HLS
+where supported — and gives you frame-accurate seeking with `currentTime` and `seeked`. For frame processing it is
+usually exactly the right tool; it just does not exist in workers. This package makes it available there.
+
 ## Install
 
 ```sh
@@ -213,6 +223,8 @@ Common mistakes are reported too:
 - **Frames.** The host captures a `VideoFrame` for every presented frame (`requestVideoFrameCallback`) and transfers it
   (zero-copy). The worker closes the previous frame. `requestVideoFrameCallback` metadata is converted to the worker's
   time origin.
+- **Backpressure.** Only one frame is in flight at a time. When the worker is busy, the host keeps just the newest
+  frame and sends it once the worker is ready, so a slow consumer always sees fresh frames instead of a backlog.
 - **Cleanup.** `dispose()` releases the main-thread element and the current frame. Elements that become unreachable are
   released automatically through `FinalizationRegistry`; like real media elements, an element is kept alive while it
   is playing.

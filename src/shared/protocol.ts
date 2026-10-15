@@ -114,6 +114,7 @@ export type ClientMessage =
     }
   | { [CHANNEL]: 1; kind: "dispose"; id: number; seq: number }
   | { [CHANNEL]: 1; kind: "canPlayType"; type: string; callId: number }
+  | { [CHANNEL]: 1; kind: "frameAck"; id: number; seq: number }
   | { [CHANNEL]: 1; kind: "hello" };
 
 export type HostMessage =

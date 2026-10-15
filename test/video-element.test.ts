@@ -468,6 +468,34 @@ describe("playback", () => {
     expect(result.quality).toBeGreaterThan(0);
   });
 
+  test("a slow worker gets the latest frame instead of a growing backlog", async () => {
+    const result = await w.run(
+      async ({ createVideoElement, helpers }, { src }) => {
+        const video = createVideoElement();
+        video.muted = true;
+        video.loop = true;
+        video.src = src;
+        await video.play();
+        let processed = 0;
+        const onFrame = () => {
+          processed++;
+          const end = performance.now() + 200;
+          while (performance.now() < end) Math.random();
+          video.requestVideoFrameCallback(onFrame);
+        };
+        video.requestVideoFrameCallback(onFrame);
+        await helpers.sleep(2000);
+        return { processed, timestamp: video.currentFrame!.timestamp / 1e6 };
+      },
+      { src: fixtures.colors },
+    );
+    const real = [...w.host!.videos.values()][0]!;
+    const lag = (real.currentTime - result.timestamp + real.duration) % real.duration;
+    expect(result.processed).toBeGreaterThan(3);
+    expect(result.processed).toBeLessThan(18);
+    expect(lag).toBeLessThan(0.45);
+  });
+
   test("pause() stops playback and is reflected synchronously", async () => {
     const result = await w.run(
       async ({ createVideoElement, helpers }, { src }) => {

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video in a Web Worker</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+        gap: 16px;
+      }
+      video,
+      canvas {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 12px 0;
+      }
+      #seek {
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <figure>
+        <figcaption>Main thread: the real &lt;video&gt;, driven by the worker</figcaption>
+        <div id="video"></div>
+      </figure>
+      <figure>
+        <figcaption>Worker: frames drawn on an OffscreenCanvas</figcaption>
+        <canvas id="output"></canvas>
+      </figure>
+    </div>
+    <div class="controls">
+      <button id="play" type="button">Play</button>
+      <button id="pause" type="button">Pause</button>
+      <input id="seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="Seek" />
+    </div>
+    <p id="log"></p>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

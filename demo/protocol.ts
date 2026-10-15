@@ -1,31 +1,23 @@
-export type Effect = "none" | "grayscale" | "edges" | "chromatic" | "pixelate" | "vignette";
+import type { Effect } from "./effects.ts";
 
 export type ToWorker =
-  | { type: "init"; stage: OffscreenCanvas; timeline: OffscreenCanvas }
+  | { type: "init"; canvas: OffscreenCanvas }
   | { type: "source"; src: string }
-  | { type: "pip"; src: string | null }
   | { type: "play" }
   | { type: "pause" }
   | { type: "seek"; time: number }
   | { type: "effect"; effect: Effect }
-  | { type: "muted"; muted: boolean }
-  | { type: "volume"; volume: number }
-  | { type: "rate"; rate: number };
+  | { type: "work"; ms: number }
+  | { type: "processing"; enabled: boolean };
 
-export interface Status {
+export interface WorkerStatus {
   type: "status";
   currentTime: number;
   duration: number;
   paused: boolean;
-  seeking: boolean;
-  readyState: number;
   width: number;
   height: number;
-  frameTimestamp: number | null;
-  framesReceived: number;
-  renderFps: number;
-  thumbnails: number;
+  frames: number;
+  processMs: number;
   error: string | null;
 }
-
-export type FromWorker = Status;

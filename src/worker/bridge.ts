@@ -130,6 +130,7 @@ export class Bridge {
         const receiver = this.#receivers.get(message.id)?.deref();
         if (receiver) receiver.receive(message);
         else if ("frame" in message) message.frame?.close();
+        if (message.kind === "frame") this.post({ kind: "frameAck", id: message.id });
       }
     }
   };
