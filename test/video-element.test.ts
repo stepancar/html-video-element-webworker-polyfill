@@ -309,36 +309,56 @@ describe("seeking", () => {
       { src: fixtures.colors },
     );
     const real = [...w.host!.videos.values()][0]!;
-    const stale = new VideoFrame(real);
     const Original = globalThis.VideoFrame;
+    const holder: { previous: VideoFrame | null } = { previous: null };
+    let armed = false;
     let staleCaptures = 0;
+    real.addEventListener("seeking", () => {
+      armed = true;
+    });
     globalThis.VideoFrame = new Proxy(Original, {
       construct(target, args: unknown[]) {
-        if (args[0] === real && real.seeking === false && staleCaptures === 0) {
+        if (args[0] === real && armed && !real.seeking && holder.previous) {
+          armed = false;
           staleCaptures++;
-          return new target(stale);
+          return new target(holder.previous);
         }
-        return Reflect.construct(target, args);
+        const frame = Reflect.construct(target, args) as VideoFrame;
+        if (args[0] === real) {
+          holder.previous?.close();
+          holder.previous = new target(frame);
+        }
+        return frame;
       },
     });
     try {
       const result = await w.run(async ({ helpers }) => {
         const video = (globalThis as unknown as { video: WorkerVideoElement }).video;
-        const events: string[] = [];
-        for (const type of ["seeked", "timeupdate"]) video.addEventListener(type, () => events.push(type));
-        video.currentTime = 1.2;
-        await helpers.once(video, "seeked");
-        const frame = video.currentFrame!;
-        await helpers.sleep(50);
-        return { timestamp: frame.timestamp, color: helpers.colorName(helpers.pixelOf(frame)), events };
+        const seen: Array<{ time: number; timestamp: number; color: string; events: string[] }> = [];
+        for (const time of [0.75, 1.25, 1.75, 0.25]) {
+          const events: string[] = [];
+          const onEvent = (event: Event) => events.push(event.type);
+          video.addEventListener("timeupdate", onEvent);
+          video.addEventListener("seeked", onEvent);
+          video.currentTime = time;
+          await helpers.once(video, "seeked");
+          const frame = video.currentFrame!;
+          seen.push({ time, timestamp: frame.timestamp, color: helpers.colorName(helpers.pixelOf(frame)), events });
+          video.removeEventListener("timeupdate", onEvent);
+          video.removeEventListener("seeked", onEvent);
+        }
+        return seen;
       });
-      expect(staleCaptures).toBe(1);
-      expect(result.timestamp).toBe(1_200_000);
-      expect(result.color).toBe("blue");
-      expect(result.events).toEqual(["timeupdate", "seeked"]);
+      expect(staleCaptures).toBeGreaterThan(0);
+      expect(result).toEqual([
+        { time: 0.75, timestamp: 700_000, color: "lime", events: ["timeupdate", "seeked"] },
+        { time: 1.25, timestamp: 1_200_000, color: "blue", events: ["timeupdate", "seeked"] },
+        { time: 1.75, timestamp: 1_700_000, color: "yellow", events: ["timeupdate", "seeked"] },
+        { time: 0.25, timestamp: 200_000, color: "red", events: ["timeupdate", "seeked"] },
+      ]);
     } finally {
       globalThis.VideoFrame = Original;
-      stale.close();
+      holder.previous?.close();
     }
   });
 

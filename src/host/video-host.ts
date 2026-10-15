@@ -43,7 +43,7 @@ interface Entry {
 }
 
 const FRAME_WAIT_TIMEOUT = 500;
-const UNKNOWN_FRAME_DURATION = 500_000;
+const TIMESTAMP_EPSILON = 1000;
 
 const hosted = new WeakSet<object>();
 
@@ -128,18 +128,24 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     };
 
     const noteFrame = (frame: VideoFrame): void => {
-      const previous = entry.lastFrameTimestamp;
-      if (previous !== null && frame.timestamp > previous) {
-        const delta = frame.timestamp - previous;
-        entry.frameDuration = entry.frameDuration === null ? delta : Math.min(entry.frameDuration, delta);
-      }
       entry.lastFrameTimestamp = frame.timestamp;
     };
 
-    const showsCurrentTime = (frame: VideoFrame): boolean => {
-      const target = video.currentTime * 1e6;
-      const tolerance = (entry.frameDuration ?? UNKNOWN_FRAME_DURATION) * 1.5;
-      return frame.timestamp <= target + 1000 && target - frame.timestamp < tolerance;
+    let previousPresented: { frames: number; timestamp: number } | null = null;
+    const learnFrameDuration = (frame: VideoFrame, presentedFrames: number): void => {
+      const previous = previousPresented;
+      previousPresented = { frames: presentedFrames, timestamp: frame.timestamp };
+      if (!previous || presentedFrames !== previous.frames + 1 || frame.timestamp <= previous.timestamp) return;
+      const delta = frame.timestamp - previous.timestamp;
+      entry.frameDuration = entry.frameDuration === null ? delta : Math.min(entry.frameDuration, delta);
+    };
+
+    const shows = (frame: VideoFrame, target: number): boolean => {
+      if (!video.paused && frame.timestamp >= target - TIMESTAMP_EPSILON) return true;
+      if (frame.timestamp > target + TIMESTAMP_EPSILON) return false;
+      const duration = frame.duration || entry.frameDuration;
+      if (duration) return target < frame.timestamp + duration + TIMESTAMP_EPSILON;
+      return frame.timestamp !== entry.lastFrameTimestamp;
     };
 
     const sendEvent = (type: string, frame: VideoFrame | null): void => {
@@ -154,7 +160,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       ]);
     };
 
-    let held: { type: string; queue: string[]; timer: ReturnType<typeof setTimeout> } | null = null;
+    let held: { type: string; target: number; queue: string[]; timer: ReturnType<typeof setTimeout> } | null = null;
 
     const releaseHeld = (frame: VideoFrame | null): void => {
       if (!held) return;
@@ -175,12 +181,13 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
         return;
       }
       const frame = captureFrame(entry);
-      if (!frame || showsCurrentTime(frame)) {
+      const target = video.currentTime * 1e6;
+      if (!frame || shows(frame, target)) {
         sendEvent(type, frame);
         return;
       }
       frame.close();
-      held = { type, queue: [], timer: setTimeout(() => releaseHeld(captureFrame(entry)), FRAME_WAIT_TIMEOUT) };
+      held = { type, target, queue: [], timer: setTimeout(() => releaseHeld(captureFrame(entry)), FRAME_WAIT_TIMEOUT) };
     };
 
     const onEvent = (event: Event): void => dispatch(event.type);
@@ -190,8 +197,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       entry.frameCallback = video.requestVideoFrameCallback(onFrame);
       const frame = captureFrame(entry);
       if (!frame) return;
+      learnFrameDuration(frame, metadata.presentedFrames);
       if (held) {
-        if (showsCurrentTime(frame)) releaseHeld(frame);
+        if (shows(frame, held.target)) releaseHeld(frame);
         else frame.close();
         return;
       }
