@@ -174,6 +174,26 @@ and WebGPU throw `InvalidStateError`.
 
 If you do not want global patches, pass `video.currentFrame` (a regular `VideoFrame`) to any of these APIs.
 
+### Environment checks
+
+Every function verifies that it runs where it belongs and throws an `InvalidEnvironmentError` otherwise:
+
+| Runs only on the main thread | Runs only inside a worker                                                                                                                                                                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createVideoHost`            | `createVideoElement`, `new WorkerVideoElement()`, `polyfillDocument`, `configureVideoTransport`, `polyfill2dCanvasApi`, `polyfillWebglAPI`, `polyfillWebgpu`, `polyfillCreateImageBitmap`, `polyfillVideoFrame`, `installWorkerPolyfills`, the `auto` entry |
+
+So a worker-side polyfill can never patch `document.createElement` or canvas prototypes of the page by mistake.
+`isMainThread()` and `isWorker()` are exported for your own checks.
+
+Common mistakes are reported too:
+
+- `createVideoHost()` throws a `TypeError` unless it gets a `Worker` or `MessagePort`, and an `InvalidStateError` when
+  the same endpoint is attached twice (call `dispose()` on the previous host first).
+- `createVideoElement({ transport })` and `configureVideoTransport()` throw a `TypeError` for anything that is not a
+  message endpoint.
+- A worker that creates video elements without a host on the main thread logs a warning after 3 seconds, since its
+  videos would never load.
+
 ## How it works
 
 ```

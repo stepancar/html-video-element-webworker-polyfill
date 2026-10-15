@@ -13,6 +13,7 @@ import {
   type SerializedError,
   isProtocolMessage,
 } from "../shared/protocol.ts";
+import { assertMainThread, isMainThread, isMessageEndpoint } from "../shared/environment.ts";
 
 export interface VideoHostOptions {
   container?: HTMLElement | null;
@@ -30,38 +31,72 @@ type OutgoingHostMessage = Distribute<HostMessage>;
 
 const FRAME_EVENTS = new Set(["loadeddata", "seeked"]);
 
-const DEFERRED_SNAPSHOT_DELAY = 16;
+const SILENT_STATE_POLL_INTERVAL = 16;
+const SILENT_STATE_POLLS = 32;
 
 interface Entry {
   video: HTMLVideoElement;
   frameCallback: number | null;
   lastFrameTimestamp: number | null;
+  frameDuration: number | null;
   detach: () => void;
 }
 
+const FRAME_WAIT_TIMEOUT = 500;
+const UNKNOWN_FRAME_DURATION = 500_000;
+
+const hosted = new WeakSet<object>();
+
 export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOptions = {}): VideoHost {
+  assertMainThread("createVideoHost()");
+  if (!isMessageEndpoint(endpoint) || (isMainThread() && endpoint === (globalThis as object))) {
+    throw new TypeError(
+      "html-video-element-webworker-polyfill: createVideoHost() expects the Worker (or a MessagePort connected to it) that uses the polyfill.",
+    );
+  }
+  if (hosted.has(endpoint)) {
+    throw new DOMException(
+      "html-video-element-webworker-polyfill: createVideoHost() was already called for this endpoint; call dispose() on the existing host first.",
+      "InvalidStateError",
+    );
+  }
+  hosted.add(endpoint);
   const entries = new Map<number, Entry>();
   const videos = new Map<number, HTMLVideoElement>();
   let ack = 0;
   let disposed = false;
 
+  const sentNetworkState = new Map<number, number>();
   const post = (message: OutgoingHostMessage, transfer: Transferable[] = []): void => {
     if (disposed) {
       for (const item of transfer) (item as Partial<VideoFrame>).close?.();
       return;
     }
+    if ("state" in message) sentNetworkState.set(message.id, message.state.networkState);
     endpoint.postMessage({ ...message, [CHANNEL]: 1 }, transfer);
   };
 
-  const deferred = new Set<number>();
+  const watching = new Map<number, { polls: number }>();
   const sendState = (id: number, video: HTMLVideoElement): void => {
     post({ kind: "state", id, ack, state: snapshot(video) });
-    if (deferred.has(id)) return;
-    deferred.add(id);
-    setTimeout(() => {
-      deferred.delete(id);
-      if (entries.get(id)?.video === video) post({ kind: "state", id, ack, state: snapshot(video) });
-    }, DEFERRED_SNAPSHOT_DELAY);
+    const existing = watching.get(id);
+    if (existing) {
+      existing.polls = 0;
+      return;
+    }
+    const watch = { polls: 0 };
+    watching.set(id, watch);
+    const poll = (): void => {
+      if (entries.get(id)?.video !== video || ++watch.polls > SILENT_STATE_POLLS) {
+        watching.delete(id);
+        return;
+      }
+      if (video.networkState !== sentNetworkState.get(id)) {
+        post({ kind: "state", id, ack, state: snapshot(video) });
+      }
+      setTimeout(poll, SILENT_STATE_POLL_INTERVAL);
+    };
+    setTimeout(poll, SILENT_STATE_POLL_INTERVAL);
   };
 
   const welcome = (): void => {
@@ -84,42 +119,87 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
   const create = (id: number): void => {
     const video = document.createElement("video");
     video.playsInline = true;
-    const entry: Entry = { video, frameCallback: null, lastFrameTimestamp: null, detach: () => {} };
-
-    const onEvent = (event: Event): void => {
-      if (FRAME_EVENTS.has(event.type)) {
-        const frame = captureFrame(entry);
-        if (frame) {
-          entry.lastFrameTimestamp = frame.timestamp;
-          post(
-            {
-              kind: "event",
-              id,
-              ack,
-              type: event.type,
-              state: snapshot(video),
-              frame,
-              metadata: syntheticMetadata(video, frame),
-            },
-            [frame],
-          );
-          return;
-        }
-      }
-      if (event.type === "emptied") entry.lastFrameTimestamp = null;
-      post({ kind: "event", id, ack, type: event.type, state: snapshot(video) });
+    const entry: Entry = {
+      video,
+      frameCallback: null,
+      lastFrameTimestamp: null,
+      frameDuration: null,
+      detach: () => {},
     };
+
+    const noteFrame = (frame: VideoFrame): void => {
+      const previous = entry.lastFrameTimestamp;
+      if (previous !== null && frame.timestamp > previous) {
+        const delta = frame.timestamp - previous;
+        entry.frameDuration = entry.frameDuration === null ? delta : Math.min(entry.frameDuration, delta);
+      }
+      entry.lastFrameTimestamp = frame.timestamp;
+    };
+
+    const showsCurrentTime = (frame: VideoFrame): boolean => {
+      const target = video.currentTime * 1e6;
+      const tolerance = (entry.frameDuration ?? UNKNOWN_FRAME_DURATION) * 1.5;
+      return frame.timestamp <= target + 1000 && target - frame.timestamp < tolerance;
+    };
+
+    const sendEvent = (type: string, frame: VideoFrame | null): void => {
+      if (!frame) {
+        if (type === "emptied") entry.lastFrameTimestamp = null;
+        post({ kind: "event", id, ack, type, state: snapshot(video) });
+        return;
+      }
+      noteFrame(frame);
+      post({ kind: "event", id, ack, type, state: snapshot(video), frame, metadata: syntheticMetadata(video, frame) }, [
+        frame,
+      ]);
+    };
+
+    let held: { type: string; queue: string[]; timer: ReturnType<typeof setTimeout> } | null = null;
+
+    const releaseHeld = (frame: VideoFrame | null): void => {
+      if (!held) return;
+      const { type, queue, timer } = held;
+      held = null;
+      clearTimeout(timer);
+      sendEvent(type, frame);
+      for (const queued of queue) dispatch(queued);
+    };
+
+    const dispatch = (type: string): void => {
+      if (held) {
+        held.queue.push(type);
+        return;
+      }
+      if (!FRAME_EVENTS.has(type)) {
+        sendEvent(type, null);
+        return;
+      }
+      const frame = captureFrame(entry);
+      if (!frame || showsCurrentTime(frame)) {
+        sendEvent(type, frame);
+        return;
+      }
+      frame.close();
+      held = { type, queue: [], timer: setTimeout(() => releaseHeld(captureFrame(entry)), FRAME_WAIT_TIMEOUT) };
+    };
+
+    const onEvent = (event: Event): void => dispatch(event.type);
     for (const type of MEDIA_EVENTS) video.addEventListener(type, onEvent);
 
     const onFrame = (_now: number, metadata: VideoFrameCallbackMetadata): void => {
       entry.frameCallback = video.requestVideoFrameCallback(onFrame);
       const frame = captureFrame(entry);
       if (!frame) return;
+      if (held) {
+        if (showsCurrentTime(frame)) releaseHeld(frame);
+        else frame.close();
+        return;
+      }
       if (frame.timestamp === entry.lastFrameTimestamp) {
         frame.close();
         return;
       }
-      entry.lastFrameTimestamp = frame.timestamp;
+      noteFrame(frame);
       post({ kind: "frame", id, ack, state: snapshot(video), frame, metadata: toMetadata(metadata) }, [frame]);
     };
     if (typeof video.requestVideoFrameCallback === "function") {
@@ -129,6 +209,8 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     entry.detach = () => {
       for (const type of MEDIA_EVENTS) video.removeEventListener(type, onEvent);
       if (entry.frameCallback !== null) video.cancelVideoFrameCallback(entry.frameCallback);
+      if (held) clearTimeout(held.timer);
+      held = null;
     };
 
     entries.set(id, entry);
@@ -142,6 +224,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     if (!entry) return;
     entries.delete(id);
     videos.delete(id);
+    sentNetworkState.delete(id);
     const { video } = entry;
     options.onVideoDisposed?.(video, id);
     entry.detach();
@@ -211,6 +294,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       if (disposed) return;
       for (const id of entries.keys()) release(id);
       endpoint.removeEventListener("message", onMessage);
+      hosted.delete(endpoint);
       disposed = true;
     },
   };

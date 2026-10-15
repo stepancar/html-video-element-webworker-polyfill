@@ -6,6 +6,9 @@ import {
   type MessageEndpoint,
   isProtocolMessage,
 } from "../shared/protocol.ts";
+import { assertWorker, isMessageEndpoint } from "../shared/environment.ts";
+
+export const MISSING_HOST_WARNING_DELAY = 3000;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type OutgoingMessage = DistributiveOmit<ClientMessage, typeof CHANNEL | "seq">;
@@ -31,6 +34,8 @@ export class Bridge {
   readonly #calls = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
   readonly #canPlayType = new Map<string, CanPlayTypeResult>();
   readonly #registry: FinalizationRegistry<Finalizable> | null;
+  #welcomed = false;
+  #missingHostTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(endpoint: MessageEndpoint) {
     this.endpoint = endpoint;
@@ -45,6 +50,17 @@ export class Bridge {
     endpoint.addEventListener("message", this.#onMessage);
     endpoint.start?.();
     this.post({ kind: "hello" });
+  }
+
+  watchForHost(): void {
+    if (this.#welcomed || this.#missingHostTimer !== undefined) return;
+    this.#missingHostTimer = setTimeout(() => {
+      if (this.#welcomed) return;
+      console.warn(
+        "html-video-element-webworker-polyfill: no VideoHost answered this worker. " +
+          "Call createVideoHost(worker) on the main thread right after creating the worker, otherwise videos never load.",
+      );
+    }, MISSING_HOST_WARNING_DELAY);
   }
 
   nextId(): number {
@@ -96,6 +112,8 @@ export class Bridge {
     const message = event.data as HostMessage;
     switch (message.kind) {
       case "welcome": {
+        this.#welcomed = true;
+        clearTimeout(this.#missingHostTimer);
         this.timeOffset = message.timeOrigin - performance.timeOrigin;
         for (const [type, result] of Object.entries(message.canPlayType)) this.#canPlayType.set(type, result);
         return;
@@ -139,9 +157,9 @@ let defaultEndpoint: MessageEndpoint | undefined;
 
 export function bridgeFor(endpoint: MessageEndpoint | undefined): Bridge {
   const target = endpoint ?? defaultEndpoint ?? (globalThis as unknown as MessageEndpoint);
-  if (typeof target.postMessage !== "function") {
+  if (!isMessageEndpoint(target)) {
     throw new TypeError(
-      "html-video-element-webworker-polyfill: no message endpoint. Call configureVideoTransport() or pass `transport`.",
+      "html-video-element-webworker-polyfill: `transport` must be a MessagePort or another object with postMessage/addEventListener/removeEventListener.",
     );
   }
   let bridge = bridges.get(target);
@@ -153,5 +171,11 @@ export function bridgeFor(endpoint: MessageEndpoint | undefined): Bridge {
 }
 
 export function configureVideoTransport(endpoint: MessageEndpoint): void {
+  assertWorker("configureVideoTransport()");
+  if (!isMessageEndpoint(endpoint)) {
+    throw new TypeError(
+      "html-video-element-webworker-polyfill: configureVideoTransport() expects a MessagePort or another object with postMessage/addEventListener/removeEventListener.",
+    );
+  }
   defaultEndpoint = endpoint;
 }

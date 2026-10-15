@@ -8,3 +8,4 @@ export {
   createVideoElement,
 } from "./video-element.ts";
 export type { FrameMetadata, MessageEndpoint } from "../shared/protocol.ts";
+export { InvalidEnvironmentError, isMainThread, isWorker } from "../shared/environment.ts";

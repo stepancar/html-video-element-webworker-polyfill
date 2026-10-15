@@ -36,8 +36,8 @@ describe("creation", () => {
       currentFrame: null,
       constants: [4, 3],
     });
-    await expect.poll(() => w.host.videos.size).toBe(1);
-    expect(w.host.videos.values().next().value).toBeInstanceOf(HTMLVideoElement);
+    await expect.poll(() => w.host!.videos.size).toBe(1);
+    expect(w.host!.videos.values().next().value).toBeInstanceOf(HTMLVideoElement);
   });
 
   test("polyfillDocument() makes document.createElement('video') work", async () => {
@@ -172,7 +172,7 @@ describe("loading", () => {
         video.removeAttribute("src");
         video.load();
         await helpers.once(video, "emptied");
-        await helpers.sleep(50);
+        await helpers.waitFor(() => video.networkState === video.NETWORK_EMPTY, 2000).catch(() => {});
         return {
           before,
           syncAfterEmpty,
@@ -189,7 +189,7 @@ describe("loading", () => {
       syncAfterEmpty: { readyState: 0, frame: null },
       hasAttribute: false,
       readyState: 0,
-      networkState: [...w.host.videos.values()][0]!.networkState,
+      networkState: [...w.host!.videos.values()][0]!.networkState,
       frame: null,
     });
   });
@@ -296,6 +296,50 @@ describe("seeking", () => {
       { syncTime: 0.25, syncSeeking: true },
       { time: 0.25, seeking: false, timestamp: 200_000, color: "red" },
     ]);
+  });
+
+  test("seeked waits for the new frame when the main thread still shows the old one", async () => {
+    await w.run(
+      async ({ createVideoElement, helpers }, { src }) => {
+        const video = createVideoElement();
+        video.src = src;
+        await helpers.once(video, "loadeddata");
+        (globalThis as unknown as { video: unknown }).video = video;
+      },
+      { src: fixtures.colors },
+    );
+    const real = [...w.host!.videos.values()][0]!;
+    const stale = new VideoFrame(real);
+    const Original = globalThis.VideoFrame;
+    let staleCaptures = 0;
+    globalThis.VideoFrame = new Proxy(Original, {
+      construct(target, args: unknown[]) {
+        if (args[0] === real && real.seeking === false && staleCaptures === 0) {
+          staleCaptures++;
+          return new target(stale);
+        }
+        return Reflect.construct(target, args);
+      },
+    });
+    try {
+      const result = await w.run(async ({ helpers }) => {
+        const video = (globalThis as unknown as { video: WorkerVideoElement }).video;
+        const events: string[] = [];
+        for (const type of ["seeked", "timeupdate"]) video.addEventListener(type, () => events.push(type));
+        video.currentTime = 1.2;
+        await helpers.once(video, "seeked");
+        const frame = video.currentFrame!;
+        await helpers.sleep(50);
+        return { timestamp: frame.timestamp, color: helpers.colorName(helpers.pixelOf(frame)), events };
+      });
+      expect(staleCaptures).toBe(1);
+      expect(result.timestamp).toBe(1_200_000);
+      expect(result.color).toBe("blue");
+      expect(result.events).toEqual(["timeupdate", "seeked"]);
+    } finally {
+      globalThis.VideoFrame = Original;
+      stale.close();
+    }
   });
 
   test("stale state from the main thread never overrides a newer local write", async () => {
@@ -516,7 +560,7 @@ describe("properties", () => {
       rangeError: "IndexSizeError",
       attributes: { loop: "", crossorigin: "anonymous", width: "320", autoplay: false },
     });
-    const video = [...w.host.videos.values()][0]!;
+    const video = [...w.host!.videos.values()][0]!;
     expect({
       volume: video.volume,
       muted: video.muted,
@@ -597,7 +641,7 @@ describe("many elements", () => {
       { src: fixtures.colors },
     );
     expect(result).toEqual(["red", "lime", "blue", "yellow"]);
-    expect(w.host.videos.size).toBe(4);
+    expect(w.host!.videos.size).toBe(4);
   });
 });
 
@@ -622,7 +666,7 @@ describe("cleanup", () => {
       { src: fixtures.colors },
     );
     expect(result).toEqual({ disposed: true, frame: null, frameClosed: true, playError: "InvalidStateError" });
-    await expect.poll(() => w.host.videos.size).toBe(0);
+    await expect.poll(() => w.host!.videos.size).toBe(0);
   });
 
   test("`using` disposes at the end of the scope", async () => {
@@ -630,7 +674,7 @@ describe("cleanup", () => {
       const video = createVideoElement();
       video[Symbol.dispose]();
     });
-    await expect.poll(() => w.host.videos.size).toBe(0);
+    await expect.poll(() => w.host!.videos.size).toBe(0);
   });
 
   test("garbage-collected elements are released automatically", async () => {
@@ -644,7 +688,7 @@ describe("cleanup", () => {
       },
       { src: fixtures.colors },
     );
-    await expect.poll(() => w.host.videos.size).toBe(1);
+    await expect.poll(() => w.host!.videos.size).toBe(1);
     await expect
       .poll(
         async () => {
@@ -652,7 +696,7 @@ describe("cleanup", () => {
             (globalThis as unknown as { gc: () => void }).gc();
             await new Promise((resolve) => setTimeout(resolve, 20));
           });
-          return w.host.videos.size;
+          return w.host!.videos.size;
         },
         { timeout: 10_000, interval: 100 },
       )
@@ -674,8 +718,8 @@ describe("cleanup", () => {
       await w.run(() => (globalThis as unknown as { gc: () => void }).gc());
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    expect(w.host.videos.size).toBe(1);
-    expect([...w.host.videos.values()][0]!.paused).toBe(false);
+    expect(w.host!.videos.size).toBe(1);
+    expect([...w.host!.videos.values()][0]!.paused).toBe(false);
   });
 
   test("host.dispose() releases everything", async () => {
@@ -683,9 +727,9 @@ describe("cleanup", () => {
       createVideoElement();
       createVideoElement();
     });
-    await expect.poll(() => w.host.videos.size).toBe(2);
-    w.host.dispose();
-    expect(w.host.videos.size).toBe(0);
+    await expect.poll(() => w.host!.videos.size).toBe(2);
+    w.host!.dispose();
+    expect(w.host!.videos.size).toBe(0);
   });
 });
 

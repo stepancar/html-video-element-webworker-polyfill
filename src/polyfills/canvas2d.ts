@@ -1,6 +1,8 @@
+import { assertWorker } from "../shared/environment.ts";
 import { patchMethod, unwrapArgs } from "../shared/frame-source.ts";
 
 export function polyfill2dCanvasApi(): void {
+  assertWorker("polyfill2dCanvasApi()");
   const scope = globalThis as {
     OffscreenCanvasRenderingContext2D?: { prototype: object };
     CanvasRenderingContext2D?: { prototype: object };

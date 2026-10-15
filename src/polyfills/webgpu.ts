@@ -1,6 +1,8 @@
+import { assertWorker } from "../shared/environment.ts";
 import { frameOf, noFrameError, patchMethod } from "../shared/frame-source.ts";
 
 export function polyfillWebgpu(): void {
+  assertWorker("polyfillWebgpu()");
   const scope = globalThis as { GPUQueue?: { prototype: object }; GPUDevice?: { prototype: object } };
   patchMethod(scope.GPUQueue?.prototype, "copyExternalImageToTexture", unwrapSourceDescriptor);
   patchMethod(scope.GPUDevice?.prototype, "importExternalTexture", unwrapSourceDescriptor);

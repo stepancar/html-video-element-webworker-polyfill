@@ -1,6 +1,7 @@
 import type { CreateVideoElementOptions } from "./video-element.ts";
 import { WorkerVideoElement } from "./video-element.ts";
 import { WorkerMediaError, WorkerTimeRanges } from "./media-types.ts";
+import { assertWorker } from "../shared/environment.ts";
 
 const PATCHED: unique symbol = Symbol.for("html-video-element-webworker-polyfill.patched") as never;
 
@@ -10,6 +11,7 @@ interface DocumentLike {
 }
 
 export function polyfillDocument(options?: CreateVideoElementOptions): void {
+  assertWorker("polyfillDocument()");
   const scope = globalThis as Record<string, unknown>;
   scope.HTMLVideoElement ??= WorkerVideoElement;
   scope.HTMLMediaElement ??= WorkerVideoElement;

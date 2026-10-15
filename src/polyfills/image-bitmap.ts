@@ -1,8 +1,10 @@
+import { assertWorker } from "../shared/environment.ts";
 import { frameOf, noFrameError } from "../shared/frame-source.ts";
 
 const PATCHED: unique symbol = Symbol.for("html-video-element-webworker-polyfill.patched") as never;
 
 export function polyfillCreateImageBitmap(): void {
+  assertWorker("polyfillCreateImageBitmap()");
   const scope = globalThis as { createImageBitmap?: typeof createImageBitmap & { [PATCHED]?: true } };
   const original = scope.createImageBitmap;
   if (typeof original !== "function" || original[PATCHED]) return;
@@ -17,6 +19,7 @@ export function polyfillCreateImageBitmap(): void {
 }
 
 export function polyfillVideoFrame(): void {
+  assertWorker("polyfillVideoFrame()");
   const scope = globalThis as { VideoFrame?: typeof VideoFrame & { [PATCHED]?: true } };
   const original = scope.VideoFrame;
   if (typeof original !== "function" || original[PATCHED]) return;

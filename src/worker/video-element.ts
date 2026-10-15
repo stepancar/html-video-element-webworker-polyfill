@@ -1,3 +1,4 @@
+import { assertWorker } from "../shared/environment.ts";
 import { FRAME_SOURCE } from "../shared/frame-source.ts";
 import {
   type CanPlayTypeResult,
@@ -282,8 +283,11 @@ export class WorkerVideoElement extends EventTarget {
   readonly localName = "video" as const;
 
   constructor(options: CreateVideoElementOptions = {}) {
+    assertWorker("createVideoElement()");
     super();
-    internals.set(this, new Internals(this, bridgeFor(options.transport)));
+    const bridge = bridgeFor(options.transport);
+    bridge.watchForHost();
+    internals.set(this, new Internals(this, bridge));
   }
 
   get currentFrame(): VideoFrame | null {

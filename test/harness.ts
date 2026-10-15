@@ -10,16 +10,16 @@ export const fixtures = {
 
 export interface TestWorker {
   worker: Worker;
-  host: VideoHost;
+  host: VideoHost | null;
   run<T, A = undefined>(fn: (lib: Lib, args: A) => T | Promise<T>, args?: A): Promise<Awaited<T>>;
   dispose(): void;
 }
 
 let nextCall = 1;
 
-export function startWorker(): TestWorker {
+export function startWorker({ host: withHost = true }: { host?: boolean } = {}): TestWorker {
   const worker = new Worker(new URL("./worker-harness.ts", import.meta.url), { type: "module" });
-  const host = createVideoHost(worker);
+  const host = withHost ? createVideoHost(worker) : null;
   const pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   worker.addEventListener("message", (event: MessageEvent) => {
     const data = event.data as {
@@ -55,7 +55,7 @@ export function startWorker(): TestWorker {
       });
     },
     dispose() {
-      host.dispose();
+      host?.dispose();
       worker.terminate();
     },
   };
