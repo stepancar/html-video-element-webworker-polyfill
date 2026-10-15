@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "isolatedDeclarations": false,
+    "declaration": false,
+    "lib": ["ES2023", "ESNext", "DOM", "DOM.Iterable"],
+    "types": ["@webgpu/types", "vite/client", "@vitest/browser-playwright"]
+  },
+  "include": ["."]
+}

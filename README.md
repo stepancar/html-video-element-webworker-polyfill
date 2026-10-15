@@ -1,2 +1,236 @@
 # html-video-element-webworker-polyfill
-Allows to use htmlVideoElement like interface for processing frames in webworker
+
+[![CI](https://github.com/stepancar/html-video-element-webworker-polyfill/actions/workflows/ci.yml/badge.svg)](https://github.com/stepancar/html-video-element-webworker-polyfill/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/html-video-element-webworker-polyfill)](https://www.npmjs.com/package/html-video-element-webworker-polyfill)
+
+Use `HTMLVideoElement` inside a Web Worker:
+
+```ts
+// worker.ts
+const video = document.createElement("video");
+video.src = "https://example.com/movie.webm";
+video.addEventListener("seeked", () => {
+  ctx.drawImage(video, 0, 0); // OffscreenCanvas 2D, WebGL and WebGPU work too
+});
+video.currentTime = 12.5;
+```
+
+Workers have no DOM, so this package keeps a real `<video>` on the main thread and mirrors it into the worker:
+properties and method calls go to the main thread, state and events come back, and every decoded frame is
+transferred to the worker as a `VideoFrame`. The worker keeps the current frame, so it can be read **synchronously**
+— in a `seeked` handler, a `requestVideoFrameCallback` callback, or anywhere else.
+
+**[Live demo →](https://stepancar.github.io/html-video-element-webworker-polyfill/)** — a small video editor whose
+playback, WebGL effects, picture-in-picture and timeline thumbnails are all rendered in a worker.
+
+## Install
+
+```sh
+npm install html-video-element-webworker-polyfill
+```
+
+## Quick start
+
+**Main thread** — serve video elements to the worker. This is the only main-thread code you need:
+
+```ts
+import { createVideoHost } from "html-video-element-webworker-polyfill/host";
+
+const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+const host = createVideoHost(worker); // call right after creating the worker
+```
+
+**Worker** — use the standard API:
+
+```ts
+import { polyfillDocument } from "html-video-element-webworker-polyfill/worker";
+import { polyfill2dCanvasApi } from "html-video-element-webworker-polyfill/canvas2d";
+
+polyfillDocument(); // document.createElement("video")
+polyfill2dCanvasApi(); // ctx.drawImage(video, ...)
+
+const canvas = new OffscreenCanvas(640, 360);
+const ctx = canvas.getContext("2d")!;
+
+const video = document.createElement("video");
+video.muted = true;
+video.src = "/movie.webm";
+
+video.addEventListener("loadedmetadata", () => {
+  video.currentTime = 10;
+});
+video.addEventListener("seeked", () => {
+  ctx.drawImage(video, 0, 0, 640, 360);
+});
+```
+
+…or the explicit, non-standard API that needs no global patches:
+
+```ts
+import { createVideoElement } from "html-video-element-webworker-polyfill/worker";
+
+const video = createVideoElement();
+video.src = "/movie.webm";
+await video.play();
+
+video.requestVideoFrameCallback(function onFrame(now, metadata) {
+  const frame = video.currentFrame; // VideoFrame | null, always the frame on screen
+  // ...
+  video.requestVideoFrameCallback(onFrame);
+});
+
+// later
+video.dispose();
+```
+
+Prefer a single import? `import "html-video-element-webworker-polyfill/auto"` inside the worker installs every
+polyfill.
+
+## Entry points
+
+Every feature is a separate subpath with no side effects (except `auto`), so bundles only contain what you import.
+Importing from the package root tree-shakes just as well.
+
+| Import                                               | Where       | Exports                                                                                   | Size (min, approx.) |
+| ---------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- | ------------------- |
+| `html-video-element-webworker-polyfill/host`         | main thread | `createVideoHost`                                                                         | 10 kB               |
+| `html-video-element-webworker-polyfill/worker`       | worker      | `createVideoElement`, `WorkerVideoElement`, `polyfillDocument`, `configureVideoTransport` | 22 kB               |
+| `html-video-element-webworker-polyfill/canvas2d`     | worker      | `polyfill2dCanvasApi`                                                                     | 2.6 kB              |
+| `html-video-element-webworker-polyfill/webgl`        | worker      | `polyfillWebglAPI`                                                                        | 2.6 kB              |
+| `html-video-element-webworker-polyfill/webgpu`       | worker      | `polyfillWebgpu`                                                                          | 2.7 kB              |
+| `html-video-element-webworker-polyfill/image-bitmap` | worker      | `polyfillCreateImageBitmap`, `polyfillVideoFrame`                                         | 2.6 kB              |
+| `html-video-element-webworker-polyfill/auto`         | worker      | side effect: installs everything above                                                    | 29 kB               |
+| `html-video-element-webworker-polyfill`              | both        | all of the above + `installWorkerPolyfills`, `frameOf`                                    | —                   |
+
+`pnpm check:treeshake` bundles each import with Rolldown and asserts that e.g. `polyfillWebglAPI` pulls in neither the
+element nor the host.
+
+## API
+
+### `createVideoHost(endpoint, options?)` — main thread
+
+`endpoint` is a `Worker` or a `MessagePort`. Several workers can each have their own host, and each host serves any
+number of elements. Messages are tagged, so the channel can be shared with your own messages.
+
+```ts
+interface VideoHostOptions {
+  container?: HTMLElement | null; // mount the real <video> elements here (default: detached)
+  onVideoCreated?(video: HTMLVideoElement, id: number): void;
+  onVideoDisposed?(video: HTMLVideoElement, id: number): void;
+}
+
+interface VideoHost {
+  readonly videos: ReadonlyMap<number, HTMLVideoElement>; // live real elements
+  dispose(): void; // release everything (e.g. before worker.terminate())
+}
+```
+
+### `WorkerVideoElement` — worker
+
+An `EventTarget` implementing the `HTMLVideoElement`/`HTMLMediaElement` API:
+
+- **State**: `currentTime` (get/set), `duration`, `paused`, `ended`, `seeking`, `readyState`, `networkState`,
+  `videoWidth`, `videoHeight`, `currentSrc`, `error` (`MediaError`), `buffered`/`played`/`seekable` (`TimeRanges`).
+- **Settings**: `src`, `srcObject` (a `MediaSourceHandle` from a worker-side `MediaSource`), `muted`, `volume`,
+  `playbackRate`, `defaultPlaybackRate`, `defaultMuted`, `loop`, `autoplay`, `preload`, `crossOrigin`, `poster`,
+  `playsInline`, `preservesPitch`, `width`, `height`, `controls`, `disablePictureInPicture`, `disableRemotePlayback`.
+- **Methods**: `play()` (promise), `pause()`, `load()`, `fastSeek()`, `canPlayType()`, `getVideoPlaybackQuality()`,
+  `requestVideoFrameCallback()`, `cancelVideoFrameCallback()`, `getAttribute`/`setAttribute`/`hasAttribute`/
+  `removeAttribute` (for reflected attributes such as `src`, `loop`, `muted`, `crossorigin`).
+- **Events**: every media event (`loadstart`, `loadedmetadata`, `loadeddata`, `canplay`, `play`, `playing`, `pause`,
+  `seeking`, `seeked`, `timeupdate`, `ended`, `error`, `emptied`, `resize`, `volumechange`, `ratechange`, …) via
+  `addEventListener` or `on<event>` properties.
+- **Non-standard**:
+  - `currentFrame: VideoFrame | null` — the frame currently presented. It is owned by the element and closed when the
+    next frame arrives; `clone()` it to keep it longer.
+  - `dispose()` / `[Symbol.dispose]()` (works with `using`) and `disposed`.
+
+`createVideoElement({ transport? })` creates one. `transport` overrides the endpoint (default: the worker global
+scope, or what you passed to `configureVideoTransport`).
+
+### Rendering polyfills — worker
+
+Each patches prototypes once (idempotent) so that the element is accepted wherever a real video is:
+
+| Function                      | Patches                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `polyfill2dCanvasApi()`       | `OffscreenCanvasRenderingContext2D` `drawImage` (all overloads), `createPattern`                                |
+| `polyfillWebglAPI()`          | WebGL 1 & 2 `texImage2D`, `texSubImage2D`, `texImage3D`, `texSubImage3D` (all overloads)                        |
+| `polyfillWebgpu()`            | `GPUQueue.copyExternalImageToTexture({ source })`, `GPUDevice.importExternalTexture({ source })`                |
+| `polyfillCreateImageBitmap()` | `createImageBitmap(video, ...)`                                                                                 |
+| `polyfillVideoFrame()`        | `new VideoFrame(video, init)` (a `Proxy`, so `instanceof VideoFrame` is unaffected)                             |
+| `polyfillDocument()`          | `document.createElement("video")`, plus `HTMLVideoElement`/`HTMLMediaElement`/`MediaError`/`TimeRanges` globals |
+
+As with real elements, drawing a video that has no data yet is a no-op, while `createImageBitmap`, `new VideoFrame`
+and WebGPU throw `InvalidStateError`.
+
+If you do not want global patches, pass `video.currentFrame` (a regular `VideoFrame`) to any of these APIs.
+
+## How it works
+
+```
+ worker                                          main thread
+ ──────                                          ───────────
+ video.currentTime = 5  ── set(seq=7) ─────────▶ realVideo.currentTime = 5
+   (reads 5 immediately)                          ◀── state(ack=7) ─────── snapshot
+ "seeked" listeners run ◀── event + VideoFrame ── "seeked" fires, new VideoFrame(realVideo)
+ video.currentFrame      ◀── frame + metadata ─── requestVideoFrameCallback on realVideo
+```
+
+- **Optimistic writes.** Setters update the worker-side state immediately, as browsers do (`currentTime` returns the new
+  value, `paused` flips on `play()`). Each command carries a sequence number; state snapshots from the main thread are
+  only applied to a property once they acknowledge its latest local write, so stale updates never overwrite it.
+- **Events carry state.** Every forwarded event includes a full state snapshot, applied before your listeners run.
+  `seeked` and `loadeddata` also carry the new frame, so `currentFrame` is already correct inside the handler.
+- **Frames.** The host captures a `VideoFrame` for every presented frame (`requestVideoFrameCallback`) and transfers it
+  (zero-copy). The worker closes the previous frame. `requestVideoFrameCallback` metadata is converted to the worker's
+  time origin.
+- **Cleanup.** `dispose()` releases the main-thread element and the current frame. Elements that become unreachable are
+  released automatically through `FinalizationRegistry`; like real media elements, an element is kept alive while it
+  is playing.
+
+## Caveats
+
+- The main thread must be alive: frames are produced there. A long main-thread task delays frames to the worker.
+- Cross-origin media needs CORS (`video.crossOrigin = "anonymous"` and an `Access-Control-Allow-Origin` header), or no
+  frames can be captured — the same rule as for drawing a video on a canvas.
+- Browsers pause video-only media in background tabs to save power; the polyfilled element behaves the same way.
+- `canPlayType()` is synchronous. Common types are answered from a table sent by the host; others are guessed with
+  `MediaSource.isTypeSupported` and refined once the host has answered.
+- `polyfillDocument()` defines `document` in the worker, which may make some libraries think they are on the main
+  thread. Use `createVideoElement()` when that matters.
+- Requires `VideoFrame` (WebCodecs) and `requestVideoFrameCallback` on the main thread: Chrome/Edge 94+, Firefox 132+,
+  Safari 17+ (the test suite runs in Chromium).
+
+## Development
+
+```sh
+pnpm install
+pnpm exec playwright install chromium
+
+pnpm test               # browser tests (Vitest browser mode + Playwright)
+pnpm test:update        # update screenshot references for your platform
+pnpm test:update-linux  # update Linux references in the Playwright Docker image (used by CI)
+pnpm lint               # oxlint
+pnpm format             # oxfmt
+pnpm typecheck          # tsc
+pnpm build              # tsdown → dist/
+pnpm check:treeshake    # verify each entry point stays small
+pnpm demo:dev           # demo on http://localhost:5173
+```
+
+The tests run in real Chromium. They cover the whole round trip — loading, seeking with synchronous frame access,
+playback, events, properties, many elements, `dispose()`, garbage collection, Media Source Extensions — and every
+rendering polyfill, with pixel assertions and screenshot comparisons (`test/__screenshots__`).
+
+### Releasing
+
+1. Bump `version` in `package.json` and merge to `main`.
+2. Publish a GitHub release tagged `v<version>`. The `Release` workflow tests, builds and publishes to npm with
+   provenance (configure npm trusted publishing for the workflow, or add an `NPM_TOKEN` secret).
+
+The demo is deployed to GitHub Pages on every push to `main`.
+
+## License
+
+Apache-2.0

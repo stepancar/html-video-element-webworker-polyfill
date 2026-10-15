@@ -1,0 +1,32 @@
+name: Release
+
+# Publishes to npm when a GitHub release is published (tag it `v<version>`).
+# Uses npm trusted publishing (OIDC); alternatively set an NPM_TOKEN secret.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Check that the tag matches package.json
+        run: test "v$(node -p 'require(`./package.json`).version')" = "${{ github.event.release.tag_name }}"
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm lint && pnpm typecheck && pnpm test
+      - run: pnpm build && pnpm check:treeshake
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

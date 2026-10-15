@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "isolatedDeclarations": false,
+    "declaration": false,
+    "types": ["vite/client"],
+    "paths": {
+      "html-video-element-webworker-polyfill/host": ["../src/host/index.ts"],
+      "html-video-element-webworker-polyfill/worker": ["../src/worker/index.ts"],
+      "html-video-element-webworker-polyfill/canvas2d": ["../src/polyfills/canvas2d.ts"],
+      "html-video-element-webworker-polyfill/webgl": ["../src/polyfills/webgl.ts"]
+    }
+  },
+  "include": ["*.ts"],
+  "exclude": ["vite.config.ts"]
+}

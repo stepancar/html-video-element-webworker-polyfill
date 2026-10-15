@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "env": {
+    "browser": true,
+    "worker": true,
+    "es2024": true
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": "error",
+    "import/no-cycle": "error",
+    "unicorn/prefer-add-event-listener": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/require-post-message-target-origin": "off",
+    "no-await-in-loop": "off",
+    "import/no-unassigned-import": [
+      "warn",
+      {
+        "allow": ["**/auto.ts", "**/auto"]
+      }
+    ]
+  },
+  "ignorePatterns": ["dist", "demo/dist", "node_modules"],
+  "overrides": [
+    {
+      "files": ["test/**"],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off"
+      }
+    },
+    {
+      "files": ["src/worker/video-element.ts"],
+      "rules": {
+        "typescript/no-unsafe-declaration-merging": "off"
+      }
+    }
+  ]
+}
