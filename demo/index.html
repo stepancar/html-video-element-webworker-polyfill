@@ -45,7 +45,7 @@
             <figcaption>
               <span class="tag main">Main thread</span>
               <strong>The real &lt;video&gt;</strong>
-              <span>Created, played and seeked by the worker.</span>
+              <span id="video-subtitle">Created, played and seeked by the worker.</span>
             </figcaption>
             <div class="screen" id="video-slot"></div>
           </figure>
@@ -57,17 +57,30 @@
 
           <figure class="panel">
             <figcaption>
-              <span class="tag" id="output-tag">Web Worker</span>
-              <strong id="output-title">Frames processed in the worker</strong>
-              <span id="output-subtitle">Pulled with requestVideoFrameCallback, filtered pixel by pixel in JS.</span>
+              <span class="tag" id="output-tag">Web Workers</span>
+              <strong id="output-title">Frames processed in the workers</strong>
+              <span id="output-subtitle">Each worker pulls its own frames and filters them pixel by pixel in JS.</span>
             </figcaption>
-            <div class="screen">
-              <canvas id="worker-canvas" aria-label="Frames processed in the worker"></canvas>
-              <canvas id="main-canvas" aria-label="Frames processed on the main thread" hidden></canvas>
-              <div id="error" class="error" hidden></div>
-            </div>
-            <p class="metric" id="process-metric">–</p>
+            <div class="screen tiles" id="tiles"></div>
+            <div id="error" class="error-line" hidden></div>
           </figure>
+        </div>
+
+        <div class="throughput" aria-live="polite">
+          <div class="counter" id="counter-main">
+            <span class="counter-label">1 main thread</span>
+            <span class="counter-value"><span id="fps-main">–</span><small>frames/s</small></span>
+            <span class="counter-note" id="note-main">Switch to “Main thread” to measure.</span>
+          </div>
+          <div class="counter" id="counter-workers">
+            <span class="counter-label" id="label-workers">4 workers</span>
+            <span class="counter-value"><span id="fps-workers">–</span><small>frames/s</small></span>
+            <span class="counter-note" id="note-workers">Measuring…</span>
+          </div>
+          <p class="hint">
+            Frames processed per second, summed over all videos. Same videos, same filter and the same extra work in
+            both cases.
+          </p>
         </div>
 
         <div class="transport">
@@ -83,10 +96,20 @@
           <fieldset>
             <legend>Process frames on</legend>
             <div class="segmented" id="mode">
-              <button type="button" data-mode="worker" aria-pressed="true">Web Worker</button>
+              <button type="button" data-mode="worker" aria-pressed="true">Web Workers</button>
               <button type="button" data-mode="main" aria-pressed="false">Main thread</button>
             </div>
             <p class="hint" id="mode-hint"></p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Videos and worker threads</legend>
+            <div class="segmented" id="threads">
+              <button type="button" data-count="1">1</button>
+              <button type="button" data-count="4">4</button>
+              <button type="button" data-count="9">9</button>
+            </div>
+            <p class="hint" id="cores"></p>
           </fieldset>
 
           <fieldset>

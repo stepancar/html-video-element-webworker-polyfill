@@ -1,8 +1,8 @@
 import type { Effect } from "./effects.ts";
 
 export type ToWorker =
-  | { type: "init"; canvas: OffscreenCanvas }
-  | { type: "source"; src: string }
+  | { type: "init"; canvas: OffscreenCanvas; index: number }
+  | { type: "source"; src: string; play: boolean }
   | { type: "play" }
   | { type: "pause" }
   | { type: "seek"; time: number }
@@ -12,12 +12,14 @@ export type ToWorker =
 
 export interface WorkerStatus {
   type: "status";
+  index: number;
   currentTime: number;
   duration: number;
   paused: boolean;
   width: number;
   height: number;
-  frames: number;
+  fps: number;
+  load: number;
   processMs: number;
   error: string | null;
 }

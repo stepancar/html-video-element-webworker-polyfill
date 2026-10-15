@@ -1,6 +1,6 @@
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
-import { createVideoHost } from "html-video-element-webworker-polyfill/host";
+import { type VideoHost, createVideoHost } from "html-video-element-webworker-polyfill/host";
 import { EFFECTS, type Effect, applyEffect, busyWait } from "./effects.ts";
 import type { ToWorker, WorkerStatus } from "./protocol.ts";
 
@@ -18,13 +18,26 @@ const SOURCES = [
   { label: "Test pattern", src: new URL("pattern.webm", document.baseURI).href },
 ];
 
+const MEASURE_INTERVAL = 500;
+const SMOOTHING = 0.35;
+
 type Mode = "worker" | "main";
 
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+interface Stream {
+  index: number;
+  worker: Worker;
+  host: VideoHost;
+  workerCanvas: HTMLCanvasElement;
+  mainCanvas: HTMLCanvasElement;
+  mainContext: CanvasRenderingContext2D;
+  label: HTMLElement;
+  status: WorkerStatus | null;
+  watched: HTMLVideoElement | null;
+  mainProcessed: number;
+  mainFps: number;
+}
 
-const workerCanvas = $<HTMLCanvasElement>("worker-canvas");
-const mainCanvas = $<HTMLCanvasElement>("main-canvas");
-const seek = $<HTMLInputElement>("seek");
+const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 function showError(message: string | null): void {
   const error = $("error");
@@ -37,20 +50,133 @@ if (!("transferControlToOffscreen" in HTMLCanvasElement.prototype) || typeof Vid
   throw new Error("Unsupported browser");
 }
 
-const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
-const host = createVideoHost(worker, { container: $("video-slot") });
-const send = (message: ToWorker, transfer: Transferable[] = []): void => worker.postMessage(message, transfer);
-
-const offscreen = workerCanvas.transferControlToOffscreen();
-send({ type: "init", canvas: offscreen }, [offscreen]);
-
-let status: WorkerStatus | null = null;
+let streams: Stream[] = [];
 let mode: Mode = "worker";
 let effect: Effect = "edges";
 let extraWork = 25;
+let source = SOURCES[0]!.src;
+let playing = true;
+let count = 4;
 
-function realVideo(): HTMLVideoElement | undefined {
-  return host.videos.values().next().value;
+const measured: Record<Mode, number | null> = { worker: null, main: null };
+let warmup = 0;
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function send(stream: Stream, message: ToWorker, transfer: Transferable[] = []): void {
+  stream.worker.postMessage(message, transfer);
+}
+
+function broadcast(message: ToWorker): void {
+  for (const stream of streams) send(stream, message);
+}
+
+function createStream(index: number): Stream {
+  const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  const host = createVideoHost(worker, { container: index === 0 ? $("video-slot") : null });
+
+  const tile = el("div", "tile");
+  const workerCanvas = el("canvas");
+  const mainCanvas = el("canvas");
+  mainCanvas.hidden = true;
+  const label = el("span", "tile-label");
+  tile.append(workerCanvas, mainCanvas, label);
+  $("tiles").append(tile);
+
+  const stream: Stream = {
+    index,
+    worker,
+    host,
+    workerCanvas,
+    mainCanvas,
+    mainContext: mainCanvas.getContext("2d", { willReadFrequently: true })!,
+    label,
+    status: null,
+    watched: null,
+    mainProcessed: 0,
+    mainFps: 0,
+  };
+
+  const offscreen = workerCanvas.transferControlToOffscreen();
+  send(stream, { type: "init", canvas: offscreen, index }, [offscreen]);
+  send(stream, { type: "effect", effect });
+  send(stream, { type: "work", ms: extraWork });
+  send(stream, { type: "processing", enabled: mode === "worker" });
+  send(stream, { type: "source", src: source, play: playing });
+
+  worker.addEventListener("message", (event: MessageEvent<WorkerStatus>) => {
+    if (event.data?.type !== "status") return;
+    stream.status = event.data;
+    watchRealVideo(stream);
+    renderLabel(stream);
+    if (stream.index === 0) renderTransport(event.data);
+    if (event.data.error) showError(`Could not play this video: ${event.data.error}`);
+  });
+  return stream;
+}
+
+function setCount(next: number): void {
+  count = next;
+  for (const stream of streams) {
+    stream.host.dispose();
+    stream.worker.terminate();
+  }
+  $("tiles").replaceChildren();
+  $("tiles").dataset.count = String(next);
+  streams = Array.from({ length: next }, (_, index) => createStream(index));
+  for (const button of $("threads").querySelectorAll<HTMLButtonElement>("button")) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.count) === next));
+  }
+  $("label-workers").textContent = next === 1 ? "1 worker" : `${next} workers`;
+  $("video-subtitle").textContent =
+    next === 1
+      ? "Created, played and seeked by the worker."
+      : `Worker 1's element. The other ${next - 1} workers each drive their own, kept off the page.`;
+  resetMeasurements();
+  renderMode();
+}
+
+function realVideo(stream: Stream): HTMLVideoElement | undefined {
+  return stream.host.videos.values().next().value;
+}
+
+function watchRealVideo(stream: Stream): void {
+  const video = realVideo(stream);
+  if (!video || video === stream.watched) return;
+  stream.watched = video;
+  video.addEventListener("seeked", () => processOnMain(stream));
+  const onFrame = (): void => {
+    if (!streams.includes(stream)) return;
+    processOnMain(stream);
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
+}
+
+function processOnMain(stream: Stream): void {
+  const video = realVideo(stream);
+  if (mode !== "main" || !video || video.readyState < video.HAVE_CURRENT_DATA) return;
+  const { videoWidth: width, videoHeight: height } = video;
+  const canvas = stream.mainCanvas;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  stream.mainContext.drawImage(video, 0, 0);
+  const image = stream.mainContext.getImageData(0, 0, width, height);
+  applyEffect(image, effect);
+  busyWait(extraWork);
+  stream.mainContext.putImageData(image, 0, 0);
+  stream.mainProcessed++;
 }
 
 function chips<T>(
@@ -61,10 +187,8 @@ function chips<T>(
 ): (value: T | undefined) => void {
   const container = $(id);
   const buttons = items.map(({ label, value }) => {
-    const button = document.createElement("button");
+    const button = el("button", "chip", label);
     button.type = "button";
-    button.className = "chip";
-    button.textContent = label;
     button.addEventListener("click", () => {
       select(value);
       onSelect(value);
@@ -81,20 +205,23 @@ function chips<T>(
 
 chips("effects", EFFECTS, effect, (value) => {
   effect = value;
-  send({ type: "effect", effect: value });
-  processOnMain();
+  broadcast({ type: "effect", effect: value });
+  for (const stream of streams) processOnMain(stream);
+  resetMeasurements();
 });
 
 const selectSource = chips(
   "sources",
   SOURCES.map(({ label, src }) => ({ label, value: src })),
-  SOURCES[0]!.src,
+  source,
   (src) => setSource(src),
 );
 
 function setSource(src: string): void {
+  source = src;
   showError(null);
-  send({ type: "source", src });
+  broadcast({ type: "source", src, play: playing });
+  resetMeasurements();
 }
 
 let objectUrl: string | null = null;
@@ -111,84 +238,116 @@ const work = $<HTMLInputElement>("work");
 work.addEventListener("input", () => {
   extraWork = Number(work.value);
   $("work-value").textContent = `${extraWork} ms`;
-  send({ type: "work", ms: extraWork });
+  broadcast({ type: "work", ms: extraWork });
+  resetMeasurements();
 });
-send({ type: "work", ms: extraWork });
+
+for (const button of $("threads").querySelectorAll<HTMLButtonElement>("button")) {
+  button.addEventListener("click", () => setCount(Number(button.dataset.count)));
+}
+$("cores").textContent = navigator.hardwareConcurrency
+  ? `One video per worker. This device reports ${navigator.hardwareConcurrency} logical cores.`
+  : "One video per worker.";
 
 const MODE_TEXT: Record<Mode, { tag: string; title: string; subtitle: string; hint: string }> = {
   worker: {
-    tag: "Web Worker",
-    title: "Frames processed in the worker",
-    subtitle: "Pulled with requestVideoFrameCallback, filtered pixel by pixel in JS.",
-    hint: "The heavy work runs in the worker. The animation below stays smooth.",
+    tag: "Web Workers",
+    title: "Frames processed in the workers",
+    subtitle: "Each worker pulls its own frames and filters them pixel by pixel in JS.",
+    hint: "Every video is processed in its own worker. The page stays smooth.",
   },
   main: {
     tag: "Main thread",
     title: "Frames processed on the main thread",
-    subtitle: "The same filter, run where video processing usually has to live.",
-    hint: "Now every frame blocks the page: watch the red bars and try scrolling.",
+    subtitle: "The same filter for every video, all on the one main thread.",
+    hint: "All videos share one thread now: throughput drops and the page stutters.",
   },
 };
 
-const mainContext = mainCanvas.getContext("2d", { willReadFrequently: true })!;
-let mainFrames = 0;
-let mainProcessMs = 0;
-
-function setMode(next: Mode): void {
-  mode = next;
+function renderMode(): void {
   for (const button of $("mode").querySelectorAll<HTMLButtonElement>("button")) {
-    button.setAttribute("aria-pressed", String(button.dataset.mode === next));
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   }
-  const text = MODE_TEXT[next];
+  const text = MODE_TEXT[mode];
   const tag = $("output-tag");
   tag.textContent = text.tag;
-  tag.classList.toggle("main", next === "main");
+  tag.classList.toggle("main", mode === "main");
   $("output-title").textContent = text.title;
   $("output-subtitle").textContent = text.subtitle;
   $("mode-hint").textContent = text.hint;
-  workerCanvas.hidden = next !== "worker";
-  mainCanvas.hidden = next !== "main";
-  send({ type: "processing", enabled: next === "worker" });
-  mainFrames = 0;
-  processOnMain();
-  renderMetric();
+  for (const stream of streams) {
+    stream.workerCanvas.hidden = mode !== "worker";
+    stream.mainCanvas.hidden = mode !== "main";
+    renderLabel(stream);
+  }
+  renderCounters();
+}
+
+function setMode(next: Mode): void {
+  mode = next;
+  warmup = 2;
+  broadcast({ type: "processing", enabled: next === "worker" });
+  renderMode();
+  for (const stream of streams) processOnMain(stream);
 }
 
 for (const button of $("mode").querySelectorAll<HTMLButtonElement>("button")) {
   button.addEventListener("click", () => setMode(button.dataset.mode as Mode));
 }
 
-function processOnMain(): void {
-  const video = realVideo();
-  if (mode !== "main" || !video || video.readyState < video.HAVE_CURRENT_DATA) return;
-  const started = performance.now();
-  const { videoWidth: width, videoHeight: height } = video;
-  if (mainCanvas.width !== width || mainCanvas.height !== height) {
-    mainCanvas.width = width;
-    mainCanvas.height = height;
-  }
-  mainContext.drawImage(video, 0, 0);
-  const image = mainContext.getImageData(0, 0, width, height);
-  applyEffect(image, effect);
-  busyWait(extraWork);
-  mainContext.putImageData(image, 0, 0);
-  mainFrames++;
-  mainProcessMs = performance.now() - started;
-  renderMetric();
+function renderLabel(stream: Stream): void {
+  const name = mode === "worker" ? `Worker ${stream.index + 1}` : "Main thread";
+  const fps = mode === "worker" ? (stream.status?.fps ?? 0) : stream.mainFps;
+  const busy = mode === "worker" && stream.status ? ` · ${Math.round(stream.status.load * 100)}% busy` : "";
+  stream.label.textContent = `${name} · ${fps.toFixed(0)} fps${busy}`;
+  stream.label.classList.toggle("main", mode === "main");
 }
 
-let watchedVideo: HTMLVideoElement | null = null;
-function watchRealVideo(): void {
-  const video = realVideo();
-  if (!video || video === watchedVideo) return;
-  watchedVideo = video;
-  video.addEventListener("seeked", processOnMain);
-  const onFrame = (): void => {
-    processOnMain();
-    video.requestVideoFrameCallback(onFrame);
-  };
-  video.requestVideoFrameCallback(onFrame);
+function resetMeasurements(): void {
+  measured.worker = null;
+  measured.main = null;
+  warmup = 2;
+  renderCounters();
 }
+
+function renderCounters(): void {
+  for (const which of ["main", "worker"] as const) {
+    const id = which === "main" ? "main" : "workers";
+    const value = measured[which];
+    const active = which === mode;
+    $(`counter-${id}`).classList.toggle("active", active);
+    $(`fps-${id}`).textContent = value === null ? "–" : value.toFixed(0);
+    const other = which === "main" ? "Main thread" : "Web Workers";
+    $(`note-${id}`).textContent = active
+      ? value === null
+        ? "Measuring…"
+        : "Measuring live"
+      : value === null
+        ? `Switch to “${other}” to measure.`
+        : "Last measured";
+  }
+}
+
+function measure(): void {
+  for (const stream of streams) {
+    stream.mainFps = (stream.mainProcessed * 1000) / MEASURE_INTERVAL;
+    stream.mainProcessed = 0;
+    if (mode === "main") renderLabel(stream);
+  }
+  if (warmup > 0) {
+    warmup--;
+    renderCounters();
+    return;
+  }
+  const total =
+    mode === "worker"
+      ? streams.reduce((sum, stream) => sum + (stream.status?.fps ?? 0), 0)
+      : streams.reduce((sum, stream) => sum + stream.mainFps, 0);
+  const previous = measured[mode];
+  measured[mode] = previous === null ? total : previous + (total - previous) * SMOOTHING;
+  renderCounters();
+}
+setInterval(measure, MEASURE_INTERVAL);
 
 function format(seconds: number): string {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -196,37 +355,28 @@ function format(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-function renderMetric(): void {
-  if (!status?.width) return;
-  const size = `${status.width}×${status.height}`;
-  $("process-metric").textContent =
-    mode === "worker"
-      ? `${size} · ${status.processMs.toFixed(1)} ms per frame in the worker · ${status.frames} frames`
-      : `${size} · ${mainProcessMs.toFixed(1)} ms per frame on the main thread · ${mainFrames} frames`;
-}
-
+const seek = $<HTMLInputElement>("seek");
 let scrubbing = false;
 seek.addEventListener("pointerdown", () => (scrubbing = true));
 seek.addEventListener("pointerup", () => (scrubbing = false));
 seek.addEventListener("input", () => {
-  if (status && Number.isFinite(status.duration)) send({ type: "seek", time: Number(seek.value) * status.duration });
+  const duration = streams[0]?.status?.duration ?? Number.NaN;
+  if (Number.isFinite(duration)) broadcast({ type: "seek", time: Number(seek.value) * duration });
 });
 
-$("play").addEventListener("click", () => send({ type: status?.paused === false ? "pause" : "play" }));
+$("play").addEventListener("click", () => {
+  playing = streams[0]?.status?.paused ?? !playing;
+  broadcast({ type: playing ? "play" : "pause" });
+});
 
-worker.addEventListener("message", (event: MessageEvent<WorkerStatus>) => {
-  if (event.data?.type !== "status") return;
-  status = event.data;
-  watchRealVideo();
+function renderTransport(status: WorkerStatus): void {
   document.body.classList.toggle("playing", !status.paused);
   $("play").setAttribute("aria-label", status.paused ? "Play" : "Pause");
   $("time").textContent = `${format(status.currentTime)} / ${format(status.duration)}`;
   if (!scrubbing && Number.isFinite(status.duration) && status.duration > 0) {
     seek.value = String(status.currentTime / status.duration);
   }
-  showError(status.error ? `Could not play this video: ${status.error}` : null);
-  renderMetric();
-});
+}
 
 const monitor = $<HTMLCanvasElement>("monitor");
 const monitorContext = monitor.getContext("2d")!;
@@ -272,9 +422,9 @@ function drawMonitor(now: number): void {
 }
 requestAnimationFrame(drawMonitor);
 
-setMode("worker");
-setSource(SOURCES[0]!.src);
-
 for (const block of document.querySelectorAll<HTMLElement>("pre code.language-javascript")) {
   hljs.highlightElement(block);
 }
+
+setCount((navigator.hardwareConcurrency || 4) > 4 ? count : 1);
+setMode("worker");
