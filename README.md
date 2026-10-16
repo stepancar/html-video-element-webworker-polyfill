@@ -267,9 +267,14 @@ rendering polyfill, with pixel assertions and screenshot comparisons (`test/__sc
 
 ### Releasing
 
-1. Bump `version` in `package.json` and merge to `main`.
-2. Publish a GitHub release tagged `v<version>`. The `Release` workflow tests, builds and publishes to npm with
-   provenance (configure npm trusted publishing for the workflow, or add an `NPM_TOKEN` secret).
+Releases are published from GitHub Actions with npm trusted publishing (OIDC): no npm token is stored anywhere, and
+every version gets a provenance attestation.
+
+1. Bump `version` in `package.json` and push to `main`.
+2. Publish a GitHub release tagged `v<version>`. The `Release` workflow tests, builds and runs `npm publish`.
+
+One-time setup on npmjs.com: package settings → Trusted Publisher → GitHub Actions, with repository
+`stepancar/html-video-element-webworker-polyfill` and workflow `release.yml`.
 
 The demo is deployed to GitHub Pages on every push to `main`.
 
