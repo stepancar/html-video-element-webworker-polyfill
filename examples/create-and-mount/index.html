@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video created in a worker, shown on the page</title>
+    <style>
+      body {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 16px;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      #slot video {
+        display: block;
+        width: 100%;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>A video created in a worker, shown on the page</h1>
+    <p>
+      The worker calls <code>document.createElement("video")</code> and sets <code>video.id</code>. The page reacts in
+      <code>onVideoCreated</code> and puts that element into the DOM.
+    </p>
+    <div id="slot"></div>
+    <p id="log">Waiting for the worker…</p>
+    <p><small>Big Buck Bunny © Blender Foundation, CC BY 3.0.</small></p>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

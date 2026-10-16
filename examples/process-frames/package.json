@@ -1,5 +1,5 @@
 {
-  "name": "html-video-element-webworker-polyfill-example",
+  "name": "html-video-element-webworker-polyfill-process-frames",
   "version": "1.0.0",
   "private": true,
   "type": "module",
