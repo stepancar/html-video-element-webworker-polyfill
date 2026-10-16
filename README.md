@@ -265,19 +265,6 @@ The tests run in real Chromium. They cover the whole round trip — loading, see
 playback, events, properties, many elements, `dispose()`, garbage collection, Media Source Extensions — and every
 rendering polyfill, with pixel assertions and screenshot comparisons (`test/__screenshots__`).
 
-### Releasing
-
-Releases are published from GitHub Actions with npm trusted publishing (OIDC): no npm token is stored anywhere, and
-every version gets a provenance attestation.
-
-1. Bump `version` in `package.json` and push to `main`.
-2. Publish a GitHub release tagged `v<version>`. The `Release` workflow tests, builds and runs `npm publish`.
-
-One-time setup on npmjs.com: package settings → Trusted Publisher → GitHub Actions, with repository
-`stepancar/html-video-element-webworker-polyfill` and workflow `release.yml`.
-
-The demo is deployed to GitHub Pages on every push to `main`.
-
 ## License
 
 Apache-2.0

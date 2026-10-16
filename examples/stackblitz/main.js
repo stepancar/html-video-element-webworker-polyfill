@@ -1,4 +1,4 @@
-import { createVideoHost } from "https://esm.sh/gh/stepancar/html-video-element-webworker-polyfill@main/src/host/index.ts";
+import { createVideoHost } from "https://esm.sh/html-video-element-webworker-polyfill@0.1/host";
 
 const worker = new Worker("./worker.js", { type: "module" });
 createVideoHost(worker, { container: document.querySelector("#video") });

@@ -1,5 +1,5 @@
-import { polyfillDocument } from "https://esm.sh/gh/stepancar/html-video-element-webworker-polyfill@main/src/worker/index.ts";
-import { polyfill2dCanvasApi } from "https://esm.sh/gh/stepancar/html-video-element-webworker-polyfill@main/src/polyfills/canvas2d.ts";
+import { polyfillDocument } from "https://esm.sh/html-video-element-webworker-polyfill@0.1/worker";
+import { polyfill2dCanvasApi } from "https://esm.sh/html-video-element-webworker-polyfill@0.1/canvas2d";
 
 polyfillDocument();
 polyfill2dCanvasApi();
