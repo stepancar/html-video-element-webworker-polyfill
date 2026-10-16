@@ -8,338 +8,488 @@ beforeEach(() => {
 afterEach(() => w.dispose());
 
 describe("Canvas 2D", () => {
-  test("drawImage(video) draws the current frame, in all three overloads", async () => {
-    const result = await w.run(
-      async ({ createVideoElement, polyfill2dCanvasApi, helpers }, { src }) => {
+  test("drawImage(video, dx, dy) draws the current frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfill2dCanvasApi, helpers, state }, { src }) => {
         polyfill2dCanvasApi();
-        const video = createVideoElement();
-        const canvas = new OffscreenCanvas(160, 120);
-        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-        const at = (x: number, y: number) => helpers.colorName([...ctx.getImageData(x, y, 1, 1).data]);
-
-        ctx.drawImage(video as unknown as CanvasImageSource, 0, 0);
-        const beforeLoad = [...ctx.getImageData(0, 0, 1, 1).data];
-
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        video.currentTime = 0.6;
-        await helpers.once(video, "seeked");
-        ctx.drawImage(video as unknown as CanvasImageSource, 0, 0);
-        const overload3 = at(80, 60);
-
-        video.currentTime = 1.1;
-        await helpers.once(video, "seeked");
-        ctx.drawImage(video as unknown as CanvasImageSource, 0, 0, 80, 120);
-        const overload5 = [at(40, 60), at(120, 60)];
-
-        video.currentTime = 1.6;
-        await helpers.once(video, "seeked");
-        ctx.drawImage(video as unknown as CanvasImageSource, 0, 0, 160, 120, 80, 0, 80, 120);
-        const overload9 = [at(40, 60), at(120, 60)];
-        return { beforeLoad, overload3, overload5, overload9 };
+        state.video = await helpers.loadVideo(src, 0.6);
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({
-      beforeLoad: [0, 0, 0, 0],
-      overload3: "lime",
-      overload5: ["blue", "lime"],
-      overload9: ["blue", "yellow"],
+
+    // Act
+    const color = await w.run(({ helpers, state }) => {
+      const ctx = new OffscreenCanvas(160, 120).getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(state.video as unknown as CanvasImageSource, 0, 0);
+      return helpers.canvasColor(ctx, 80, 60);
     });
+
+    // Assert
+    expect(color).toBe("lime");
+  });
+
+  test("drawImage(video, dx, dy, dw, dh) scales the current frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfill2dCanvasApi, helpers, state }, { src }) => {
+        polyfill2dCanvasApi();
+        state.video = await helpers.loadVideo(src, 1.1);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const colors = await w.run(({ helpers, state }) => {
+      const ctx = new OffscreenCanvas(160, 120).getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(state.video as unknown as CanvasImageSource, 0, 0, 80, 120);
+      return [helpers.canvasColor(ctx, 40, 60), helpers.canvasColor(ctx, 120, 60)];
+    });
+
+    // Assert
+    expect(colors).toEqual(["blue", "black"]);
+  });
+
+  test("drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh) draws a region of the current frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfill2dCanvasApi, helpers, state }, { src }) => {
+        polyfill2dCanvasApi();
+        state.video = await helpers.loadVideo(src, 1.6);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const colors = await w.run(({ helpers, state }) => {
+      const ctx = new OffscreenCanvas(160, 120).getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(state.video as unknown as CanvasImageSource, 0, 0, 160, 120, 80, 0, 80, 120);
+      return [helpers.canvasColor(ctx, 40, 60), helpers.canvasColor(ctx, 120, 60)];
+    });
+
+    // Assert
+    expect(colors).toEqual(["black", "yellow"]);
+  });
+
+  test("drawImage(video) is a no-op while the element has no data", async () => {
+    // Arrange
+    await w.run(({ createVideoElement, polyfill2dCanvasApi, state }) => {
+      polyfill2dCanvasApi();
+      state.video = createVideoElement();
+    });
+
+    // Act
+    const pixel = await w.run(({ state }) => {
+      const ctx = new OffscreenCanvas(4, 4).getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(state.video as unknown as CanvasImageSource, 0, 0);
+      return [...ctx.getImageData(0, 0, 1, 1).data];
+    });
+
+    // Assert
+    expect(pixel).toEqual([0, 0, 0, 0]);
   });
 
   test("createPattern(video) uses the current frame", async () => {
-    const result = await w.run(
-      async ({ createVideoElement, polyfill2dCanvasApi, helpers }, { src }) => {
+    // Arrange
+    await w.run(
+      async ({ polyfill2dCanvasApi, helpers, state }, { src }) => {
         polyfill2dCanvasApi();
-        const video = createVideoElement();
-        const ctx = new OffscreenCanvas(400, 300).getContext("2d")!;
-        const empty = ctx.createPattern(video as unknown as CanvasImageSource, "repeat");
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        const pattern = ctx.createPattern(video as unknown as CanvasImageSource, "repeat")!;
-        ctx.fillStyle = pattern;
-        ctx.fillRect(0, 0, 400, 300);
-        return { empty, color: helpers.colorName([...ctx.getImageData(300, 250, 1, 1).data]) };
+        state.video = await helpers.loadVideo(src);
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({ empty: null, color: "red" });
+
+    // Act
+    const color = await w.run(({ helpers, state }) => {
+      const ctx = new OffscreenCanvas(400, 300).getContext("2d", { willReadFrequently: true })!;
+      ctx.fillStyle = ctx.createPattern(state.video as unknown as CanvasImageSource, "repeat")!;
+      ctx.fillRect(0, 0, 400, 300);
+      return helpers.canvasColor(ctx, 300, 250);
+    });
+
+    // Assert
+    expect(color).toBe("red");
+  });
+
+  test("createPattern(video) returns null while the element has no data", async () => {
+    // Arrange
+    await w.run(({ createVideoElement, polyfill2dCanvasApi, state }) => {
+      polyfill2dCanvasApi();
+      state.video = createVideoElement();
+    });
+
+    // Act
+    const pattern = await w.run(({ state }) =>
+      new OffscreenCanvas(4, 4).getContext("2d")!.createPattern(state.video as unknown as CanvasImageSource, "repeat"),
+    );
+
+    // Assert
+    expect(pattern).toBeNull();
   });
 });
 
-describe("createImageBitmap / VideoFrame", () => {
+describe("createImageBitmap", () => {
   test("createImageBitmap(video) snapshots the current frame", async () => {
-    const result = await w.run(
-      async ({ createVideoElement, polyfillCreateImageBitmap, helpers }, { src }) => {
+    // Arrange
+    await w.run(
+      async ({ polyfillCreateImageBitmap, helpers, state }, { src }) => {
         polyfillCreateImageBitmap();
-        const video = createVideoElement();
-        let early = "";
-        await createImageBitmap(video as unknown as ImageBitmapSource).catch((error: DOMException) => {
-          early = error.name;
-        });
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        video.currentTime = 1.2;
-        await helpers.once(video, "seeked");
-        const bitmap = await createImageBitmap(video as unknown as ImageBitmapSource);
-        const cropped = await createImageBitmap(video as unknown as ImageBitmapSource, 10, 10, 20, 30);
-        return {
-          early,
-          size: [bitmap.width, bitmap.height],
-          cropped: [cropped.width, cropped.height],
-          color: helpers.colorName(helpers.pixelOf(bitmap)),
-        };
+        state.video = await helpers.loadVideo(src, 1.2);
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({ early: "InvalidStateError", size: [160, 120], cropped: [20, 30], color: "blue" });
+
+    // Act
+    const result = await w.run(async ({ helpers, state }) => {
+      const bitmap = await createImageBitmap(state.video as unknown as ImageBitmapSource);
+      return { size: [bitmap.width, bitmap.height], color: helpers.colorName(helpers.pixelOf(bitmap)) };
+    });
+
+    // Assert
+    expect(result).toEqual({ size: [160, 120], color: "blue" });
   });
 
-  test("new VideoFrame(video) copies the current frame and keeps instanceof working", async () => {
-    const result = await w.run(
-      async ({ createVideoElement, polyfillVideoFrame, helpers }, { src }) => {
-        polyfillVideoFrame();
-        const video = createVideoElement();
-        let early = "";
-        try {
-          new VideoFrame(video as unknown as CanvasImageSource).close();
-        } catch (error) {
-          early = (error as DOMException).name;
-        }
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        video.currentTime = 0.6;
-        await helpers.once(video, "seeked");
-        const copy = new VideoFrame(video as unknown as CanvasImageSource, { timestamp: 42 });
-        const native = video.currentFrame!;
-        video.currentTime = 1.6;
-        await helpers.once(video, "seeked");
-        const out = {
-          early,
-          timestamp: copy.timestamp,
-          copyIsVideoFrame: copy instanceof VideoFrame,
-          nativeIsVideoFrame: video.currentFrame instanceof VideoFrame,
-          sameProto: Object.getPrototypeOf(copy) === VideoFrame.prototype,
-          previousFrameClosed: native.format === null,
-          copyColor: helpers.colorName(helpers.pixelOf(copy)),
-        };
-        copy.close();
-        return out;
+  test("createImageBitmap(video, sx, sy, sw, sh) crops the current frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillCreateImageBitmap, helpers, state }, { src }) => {
+        polyfillCreateImageBitmap();
+        state.video = await helpers.loadVideo(src);
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({
-      early: "InvalidStateError",
-      timestamp: 42,
-      copyIsVideoFrame: true,
-      nativeIsVideoFrame: true,
-      sameProto: true,
-      previousFrameClosed: true,
-      copyColor: "lime",
+
+    // Act
+    const size = await w.run(async ({ state }) => {
+      const bitmap = await createImageBitmap(state.video as unknown as ImageBitmapSource, 10, 10, 20, 30);
+      return [bitmap.width, bitmap.height];
     });
+
+    // Assert
+    expect(size).toEqual([20, 30]);
+  });
+
+  test("createImageBitmap(video) rejects while the element has no data", async () => {
+    // Arrange
+    await w.run(({ createVideoElement, polyfillCreateImageBitmap, state }) => {
+      polyfillCreateImageBitmap();
+      state.video = createVideoElement();
+    });
+
+    // Act
+    const errorName = await w.run(({ state }) =>
+      createImageBitmap(state.video as unknown as ImageBitmapSource).then(
+        () => "resolved",
+        (error: DOMException) => error.name,
+      ),
+    );
+
+    // Assert
+    expect(errorName).toBe("InvalidStateError");
+  });
+});
+
+describe("VideoFrame", () => {
+  test("new VideoFrame(video, init) copies the current frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillVideoFrame, helpers, state }, { src }) => {
+        polyfillVideoFrame();
+        state.video = await helpers.loadVideo(src, 0.6);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const result = await w.run(({ helpers, state }) => {
+      const copy = new VideoFrame(state.video as unknown as CanvasImageSource, { timestamp: 42 });
+      return {
+        timestamp: copy.timestamp,
+        isVideoFrame: copy instanceof VideoFrame,
+        sameProto: Object.getPrototypeOf(copy) === VideoFrame.prototype,
+        color: helpers.colorName(helpers.pixelOf(copy)),
+      };
+    });
+
+    // Assert
+    expect(result).toEqual({ timestamp: 42, isVideoFrame: true, sameProto: true, color: "lime" });
+  });
+
+  test("a copied VideoFrame outlives the element moving to another frame", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillVideoFrame, helpers, state }, { src }) => {
+        polyfillVideoFrame();
+        state.video = await helpers.loadVideo(src, 0.6);
+        state.copy = new VideoFrame(state.video as unknown as CanvasImageSource);
+        state.previous = state.video.currentFrame;
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const result = await w.run(async ({ helpers, state }) => {
+      await helpers.seekTo(state.video, 1.6);
+      return {
+        copyColor: helpers.colorName(helpers.pixelOf(state.copy as VideoFrame)),
+        previousClosed: (state.previous as VideoFrame).format === null,
+        currentIsVideoFrame: state.video.currentFrame instanceof VideoFrame,
+      };
+    });
+
+    // Assert
+    expect(result).toEqual({ copyColor: "lime", previousClosed: true, currentIsVideoFrame: true });
+  });
+
+  test("new VideoFrame(video) throws while the element has no data", async () => {
+    // Arrange
+    await w.run(({ createVideoElement, polyfillVideoFrame, state }) => {
+      polyfillVideoFrame();
+      state.video = createVideoElement();
+    });
+
+    // Act
+    const errorName = await w.run(({ helpers, state }) =>
+      helpers.errorName(() => new VideoFrame(state.video as unknown as CanvasImageSource)),
+    );
+
+    // Assert
+    expect(errorName).toBe("InvalidStateError");
   });
 });
 
 describe("WebGL", () => {
-  test("texImage2D / texSubImage2D / texImage3D accept the element (WebGL 1 and 2)", async () => {
-    const result = await w.run(
-      async ({ createVideoElement, polyfillWebglAPI, helpers }, { src }) => {
+  test("WebGL 1 texImage2D(target, level, internalformat, format, type, video)", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillWebglAPI, helpers, state }, { src }) => {
         polyfillWebglAPI();
-        const video = createVideoElement();
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        const source = video as unknown as TexImageSource;
-
-        const readTexture = (gl: WebGLRenderingContext | WebGL2RenderingContext, attach: () => void) => {
-          const fb = gl.createFramebuffer();
-          gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-          attach();
-          const pixel = new Uint8Array(4);
-          gl.readPixels(80, 60, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          return helpers.colorName([...pixel]);
-        };
-
-        const seek = async (time: number) => {
-          video.currentTime = time;
-          await helpers.once(video, "seeked");
-        };
-
-        const gl1 = new OffscreenCanvas(1, 1).getContext("webgl")!;
-        const tex1 = gl1.createTexture();
-        gl1.bindTexture(gl1.TEXTURE_2D, tex1);
-        await seek(0.2);
-        gl1.texImage2D(gl1.TEXTURE_2D, 0, gl1.RGBA, gl1.RGBA, gl1.UNSIGNED_BYTE, source);
-        const attach1 = () => gl1.framebufferTexture2D(gl1.FRAMEBUFFER, gl1.COLOR_ATTACHMENT0, gl1.TEXTURE_2D, tex1, 0);
-        const webgl1TexImage = readTexture(gl1, attach1);
-        await seek(0.7);
-        gl1.texSubImage2D(gl1.TEXTURE_2D, 0, 0, 0, gl1.RGBA, gl1.UNSIGNED_BYTE, source);
-        const webgl1TexSubImage = readTexture(gl1, attach1);
-
-        const gl2 = new OffscreenCanvas(1, 1).getContext("webgl2")!;
-        const tex2 = gl2.createTexture();
-        gl2.bindTexture(gl2.TEXTURE_2D, tex2);
-        await seek(1.2);
-        gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, 160, 120, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, source);
-        const webgl2TexImage = readTexture(gl2, () =>
-          gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, tex2, 0),
-        );
-        const tex3 = gl2.createTexture();
-        gl2.bindTexture(gl2.TEXTURE_2D_ARRAY, tex3);
-        await seek(1.7);
-        gl2.texImage3D(gl2.TEXTURE_2D_ARRAY, 0, gl2.RGBA8, 160, 120, 1, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, source);
-        const webgl2TexImage3D = readTexture(gl2, () =>
-          gl2.framebufferTextureLayer(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, tex3, 0, 0),
-        );
-        return { webgl1TexImage, webgl1TexSubImage, webgl2TexImage, webgl2TexImage3D, error: gl2.getError() };
+        state.video = await helpers.loadVideo(src, 0.2);
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({
-      webgl1TexImage: "red",
-      webgl1TexSubImage: "lime",
-      webgl2TexImage: "blue",
-      webgl2TexImage3D: "yellow",
-      error: 0,
+
+    // Act
+    const color = await w.run(({ helpers, state }) => {
+      const gl = new OffscreenCanvas(1, 1).getContext("webgl")!;
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, state.video as unknown as TexImageSource);
+      return helpers.textureColor(gl, () =>
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0),
+      );
     });
+
+    // Assert
+    expect(color).toBe("red");
   });
 
-  test("uploads are skipped while the element has no data", async () => {
-    const result = await w.run(({ createVideoElement, polyfillWebglAPI }) => {
-      polyfillWebglAPI();
+  test("WebGL 1 texSubImage2D(target, level, x, y, format, type, video)", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillWebglAPI, helpers, state }, { src }) => {
+        polyfillWebglAPI();
+        state.video = await helpers.loadVideo(src, 0.2);
+        const gl = new OffscreenCanvas(1, 1).getContext("webgl")!;
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, state.video as unknown as TexImageSource);
+        state.gl = gl;
+        state.texture = texture;
+        await helpers.seekTo(state.video, 0.7);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const color = await w.run(({ helpers, state }) => {
+      const gl = state.gl as WebGLRenderingContext;
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, state.video as unknown as TexImageSource);
+      return helpers.textureColor(gl, () =>
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.texture as WebGLTexture, 0),
+      );
+    });
+
+    // Assert
+    expect(color).toBe("lime");
+  });
+
+  test("WebGL 2 texImage2D(target, level, internalformat, width, height, border, format, type, video)", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillWebglAPI, helpers, state }, { src }) => {
+        polyfillWebglAPI();
+        state.video = await helpers.loadVideo(src, 1.2);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const result = await w.run(({ helpers, state }) => {
       const gl = new OffscreenCanvas(1, 1).getContext("webgl2")!;
-      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
-        gl.RGBA,
+        gl.RGBA8,
+        160,
+        120,
+        0,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
-        createVideoElement() as unknown as TexImageSource,
+        state.video as unknown as TexImageSource,
       );
+      const color = helpers.textureColor(gl, () =>
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0),
+      );
+      return { color, error: gl.getError() };
+    });
+
+    // Assert
+    expect(result).toEqual({ color: "blue", error: 0 });
+  });
+
+  test("WebGL 2 texImage3D uploads the current frame into a texture array", async () => {
+    // Arrange
+    await w.run(
+      async ({ polyfillWebglAPI, helpers, state }, { src }) => {
+        polyfillWebglAPI();
+        state.video = await helpers.loadVideo(src, 1.7);
+      },
+      { src: fixtures.colors },
+    );
+
+    // Act
+    const result = await w.run(({ helpers, state }) => {
+      const gl = new OffscreenCanvas(1, 1).getContext("webgl2")!;
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+      gl.texImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        gl.RGBA8,
+        160,
+        120,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        state.video as unknown as TexImageSource,
+      );
+      const color = helpers.textureColor(gl, () =>
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, texture, 0, 0),
+      );
+      return { color, error: gl.getError() };
+    });
+
+    // Assert
+    expect(result).toEqual({ color: "yellow", error: 0 });
+  });
+
+  test("uploads are skipped while the element has no data", async () => {
+    // Arrange
+    await w.run(({ createVideoElement, polyfillWebglAPI, state }) => {
+      polyfillWebglAPI();
+      state.video = createVideoElement();
+    });
+
+    // Act
+    const error = await w.run(({ state }) => {
+      const gl = new OffscreenCanvas(1, 1).getContext("webgl2")!;
+      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, state.video as unknown as TexImageSource);
       return gl.getError();
     });
-    expect(result).toBe(0);
+
+    // Assert
+    expect(error).toBe(0);
   });
 });
 
 describe("WebGPU", () => {
-  test("copyExternalImageToTexture and importExternalTexture accept the element", async ({ skip }) => {
-    const capable = await w.run(async () => {
-      const adapter = await navigator.gpu?.requestAdapter();
-      if (!adapter) return false;
-      const device = await adapter.requestDevice();
-      const canvas = new OffscreenCanvas(4, 4);
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, 4, 4);
-      const texture = device.createTexture({
-        size: [4, 4],
-        format: "rgba8unorm",
-        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
-      });
-      device.pushErrorScope("validation");
-      device.queue.copyExternalImageToTexture({ source: canvas }, { texture }, [4, 4]);
-      return (await device.popErrorScope()) === null;
-    });
-    if (!capable) skip("WebGPU cannot import external images in this browser environment");
-    const result = await w.run(
-      async ({ createVideoElement, polyfillWebgpu, helpers }, { src }) => {
-        const adapter = (await navigator.gpu.requestAdapter())!;
+  test("copyExternalImageToTexture({ source: video }) copies the current frame", async ({ skip }) => {
+    // Arrange
+    const capable = await w.run(
+      async ({ polyfillWebgpu, helpers, state }, { src }) => {
+        const device = await helpers.gpuDevice();
+        if (!device) return false;
         polyfillWebgpu();
-        const device = await adapter.requestDevice();
-        const video = createVideoElement();
-
-        const size: [number, number] = [160, 120];
-        const bytesPerRow = 768;
-        const usage =
-          GPUTextureUsage.COPY_DST |
-          GPUTextureUsage.COPY_SRC |
-          GPUTextureUsage.RENDER_ATTACHMENT |
-          GPUTextureUsage.TEXTURE_BINDING;
-        const readPixel = async (texture: GPUTexture) => {
-          const buffer = device.createBuffer({
-            size: bytesPerRow * size[1],
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-          });
-          const encoder = device.createCommandEncoder();
-          encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow }, size);
-          device.queue.submit([encoder.finish()]);
-          await buffer.mapAsync(GPUMapMode.READ);
-          const data = new Uint8Array(buffer.getMappedRange());
-          const offset = 60 * bytesPerRow + 80 * 4;
-          const pixel = Array.from(data.subarray(offset, offset + 4));
-          buffer.unmap();
-          return helpers.colorName(pixel);
-        };
-
-        let early = "";
-        try {
-          device.queue.copyExternalImageToTexture(
-            { source: video as unknown as GPUCopyExternalImageSource },
-            { texture: device.createTexture({ size, format: "rgba8unorm", usage }) },
-            size,
-          );
-        } catch (error) {
-          early = (error as DOMException).name;
-        }
-
-        video.src = src;
-        await helpers.once(video, "loadeddata");
-        video.currentTime = 0.7;
-        await helpers.once(video, "seeked");
-        const copied = device.createTexture({ size, format: "rgba8unorm", usage });
-        device.queue.copyExternalImageToTexture(
-          { source: video as unknown as GPUCopyExternalImageSource },
-          { texture: copied },
-          size,
-        );
-        const copyColor = await readPixel(copied);
-
-        video.currentTime = 1.2;
-        await helpers.once(video, "seeked");
-        const module = device.createShaderModule({
-          code: `
-            @group(0) @binding(0) var s: sampler;
-            @group(0) @binding(1) var t: texture_external;
-            struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f };
-            @vertex fn vs(@builtin(vertex_index) i: u32) -> V {
-              let xy = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
-              return V(vec4f(xy * 2.0 - 1.0, 0.0, 1.0), vec2f(xy.x, 1.0 - xy.y));
-            }
-            @fragment fn fs(v: V) -> @location(0) vec4f { return textureSampleBaseClampToEdge(t, s, v.uv); }`,
-        });
-        const pipeline = device.createRenderPipeline({
-          layout: "auto",
-          vertex: { module, entryPoint: "vs" },
-          fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm" }] },
-        });
-        const target = device.createTexture({ size, format: "rgba8unorm", usage });
-        const external = device.importExternalTexture({ source: video as unknown as VideoFrame });
-        const bindGroup = device.createBindGroup({
-          layout: pipeline.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: device.createSampler() },
-            { binding: 1, resource: external },
-          ],
-        });
-        const encoder = device.createCommandEncoder();
-        const pass = encoder.beginRenderPass({
-          colorAttachments: [
-            { view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] },
-          ],
-        });
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.draw(3);
-        pass.end();
-        device.queue.submit([encoder.finish()]);
-        const importColor = await readPixel(target);
-        return { early, copyColor, importColor };
+        state.device = device;
+        state.video = await helpers.loadVideo(src, 0.7);
+        return true;
       },
       { src: fixtures.colors },
     );
-    expect(result).toEqual({ early: "InvalidStateError", copyColor: "lime", importColor: "blue" });
+    if (!capable) skip("WebGPU cannot import external images in this browser environment");
+
+    // Act
+    const color = await w.run(async ({ helpers, state }) => {
+      const device = state.device as GPUDevice;
+      const texture = helpers.gpuTexture(device);
+      device.queue.copyExternalImageToTexture(
+        { source: state.video as unknown as GPUCopyExternalImageSource },
+        { texture },
+        [160, 120],
+      );
+      return helpers.gpuTextureColor(device, texture);
+    });
+
+    // Assert
+    expect(color).toBe("lime");
+  });
+
+  test("importExternalTexture({ source: video }) samples the current frame", async ({ skip }) => {
+    // Arrange
+    const capable = await w.run(
+      async ({ polyfillWebgpu, helpers, state }, { src }) => {
+        const device = await helpers.gpuDevice();
+        if (!device) return false;
+        polyfillWebgpu();
+        state.device = device;
+        state.video = await helpers.loadVideo(src, 1.2);
+        return true;
+      },
+      { src: fixtures.colors },
+    );
+    if (!capable) skip("WebGPU cannot import external images in this browser environment");
+
+    // Act
+    const color = await w.run(async ({ helpers, state }) => {
+      const device = state.device as GPUDevice;
+      const external = device.importExternalTexture({ source: state.video as unknown as VideoFrame });
+      return helpers.gpuTextureColor(device, helpers.renderExternalTexture(device, external));
+    });
+
+    // Assert
+    expect(color).toBe("blue");
+  });
+
+  test("copyExternalImageToTexture throws while the element has no data", async ({ skip }) => {
+    // Arrange
+    const capable = await w.run(async ({ createVideoElement, polyfillWebgpu, helpers, state }) => {
+      const device = await helpers.gpuDevice();
+      if (!device) return false;
+      polyfillWebgpu();
+      state.device = device;
+      state.video = createVideoElement();
+      return true;
+    });
+    if (!capable) skip("WebGPU cannot import external images in this browser environment");
+
+    // Act
+    const errorName = await w.run(({ helpers, state }) => {
+      const device = state.device as GPUDevice;
+      return helpers.errorName(() =>
+        device.queue.copyExternalImageToTexture(
+          { source: state.video as unknown as GPUCopyExternalImageSource },
+          { texture: helpers.gpuTexture(device) },
+          [160, 120],
+        ),
+      );
+    });
+
+    // Assert
+    expect(errorName).toBe("InvalidStateError");
   });
 });

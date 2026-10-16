@@ -1,4 +1,4 @@
-import { type VideoHost, createVideoHost } from "../src/host/index.ts";
+import { type VideoHost, createVideoHost } from "html-video-element-webworker-polyfill/host";
 import type { Lib } from "./worker-harness.ts";
 import colorsUrl from "./fixtures/colors.webm?url";
 import patternUrl from "./fixtures/pattern.webm?url";

@@ -3,23 +3,23 @@
   "version": "0.1.2",
   "description": "HTMLVideoElement inside Web Workers: a main-thread <video> mirrored into the worker with synchronous state, events and VideoFrames, plus Canvas 2D / WebGL / WebGPU polyfills.",
   "keywords": [
-    "video",
+    "canvas",
+    "frame-extraction",
     "html5-video",
     "htmlvideoelement",
-    "video-processing",
-    "frame-extraction",
-    "videoframe",
-    "webcodecs",
-    "worker",
-    "web-worker",
-    "webworker",
     "multithreading",
     "off-main-thread",
-    "canvas",
     "offscreencanvas",
+    "polyfill",
+    "video",
+    "video-processing",
+    "videoframe",
+    "web-worker",
+    "webcodecs",
     "webgl",
     "webgpu",
-    "polyfill"
+    "webworker",
+    "worker"
   ],
   "homepage": "https://stepancar.github.io/html-video-element-webworker-polyfill/",
   "bugs": {
@@ -95,7 +95,8 @@
     "demo:build": "vite build demo",
     "prepublishOnly": "npm run build",
     "check:treeshake": "node scripts/check-treeshake.mjs",
-    "test:update-linux": "scripts/update-linux-screenshots.sh"
+    "test:update-linux": "scripts/update-linux-screenshots.sh",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -103,6 +104,7 @@
     "@vitest/browser-playwright": "^5.0.4",
     "@webgpu/types": "^0.1.74",
     "highlight.js": "^11.12.0",
+    "lefthook": "^2.2.2",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "playwright": "^1.64.0",

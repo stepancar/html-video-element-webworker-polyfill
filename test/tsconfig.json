@@ -4,7 +4,17 @@
     "isolatedDeclarations": false,
     "declaration": false,
     "lib": ["ES2023", "ESNext", "DOM", "DOM.Iterable"],
-    "types": ["@webgpu/types", "vite/client", "@vitest/browser-playwright"]
+    "types": ["@webgpu/types", "vite/client", "@vitest/browser-playwright"],
+    "paths": {
+      "html-video-element-webworker-polyfill": ["../src/index.ts"],
+      "html-video-element-webworker-polyfill/host": ["../src/host/index.ts"],
+      "html-video-element-webworker-polyfill/worker": ["../src/worker/index.ts"],
+      "html-video-element-webworker-polyfill/canvas2d": ["../src/polyfills/canvas2d.ts"],
+      "html-video-element-webworker-polyfill/webgl": ["../src/polyfills/webgl.ts"],
+      "html-video-element-webworker-polyfill/webgpu": ["../src/polyfills/webgpu.ts"],
+      "html-video-element-webworker-polyfill/image-bitmap": ["../src/polyfills/image-bitmap.ts"],
+      "html-video-element-webworker-polyfill/auto": ["../src/auto.ts"]
+    }
   },
   "include": ["."]
 }

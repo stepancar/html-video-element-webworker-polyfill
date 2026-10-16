@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: format
+      glob: "*.{ts,js,mjs,json,md,yml,yaml,css,html}"
+      exclude:
+        - package-lock.json
+      run: npx oxfmt --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: lint
+      glob: "*.{ts,js,mjs}"
+      run: npx oxlint {staged_files}
+    - name: typecheck
+      glob: "*.ts"
+      run: npm run typecheck

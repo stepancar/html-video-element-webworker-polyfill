@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
@@ -6,7 +7,25 @@ const gpuArgs =
     ? ["--use-angle=metal"]
     : ["--use-angle=swiftshader", "--enable-features=Vulkan", "--use-vulkan=swiftshader"];
 
+const PACKAGE = "html-video-element-webworker-polyfill";
+const ENTRIES: Record<string, string> = {
+  "": "index.ts",
+  "/host": "host/index.ts",
+  "/worker": "worker/index.ts",
+  "/canvas2d": "polyfills/canvas2d.ts",
+  "/webgl": "polyfills/webgl.ts",
+  "/webgpu": "polyfills/webgpu.ts",
+  "/image-bitmap": "polyfills/image-bitmap.ts",
+  "/auto": "auto.ts",
+};
+
 export default defineConfig({
+  resolve: {
+    alias: Object.entries(ENTRIES).map(([subpath, file]) => ({
+      find: new RegExp(`^${PACKAGE}${subpath}$`),
+      replacement: fileURLToPath(new URL(`./src/${file}`, import.meta.url)),
+    })),
+  },
   test: {
     include: ["test/**/*.test.ts"],
     testTimeout: 20_000,
