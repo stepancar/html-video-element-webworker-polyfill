@@ -2,6 +2,7 @@ import { assertWorker } from "../shared/environment.ts";
 import { FRAME_SOURCE } from "../shared/frame-source.ts";
 import {
   type CanPlayTypeResult,
+  type ConnectResult,
   type FrameMetadata,
   type HostMessage,
   MEDIA_EVENTS,
@@ -10,6 +11,12 @@ import {
 } from "../shared/protocol.ts";
 import { type Bridge, type ElementReceiver, bridgeFor } from "./bridge.ts";
 import { WorkerMediaError, WorkerTimeRanges } from "./media-types.ts";
+
+const CONNECT: unique symbol = Symbol("connect") as never;
+
+interface InternalOptions extends CreateVideoElementOptions {
+  [CONNECT]?: string;
+}
 
 export interface CreateVideoElementOptions {
   transport?: MessageEndpoint;
@@ -55,6 +62,7 @@ const EMPTY_STATE: MediaState = {
   played: [],
   seekable: [],
   quality: null,
+  props: {},
 };
 
 const LOAD_RESET: Partial<MediaState> = {
@@ -88,6 +96,13 @@ const ATTRIBUTES: Record<string, { prop: string; type: "bool" | "string" | "numb
   width: { prop: "width", type: "number" },
 };
 
+function frameReleaser(holder: { current: VideoFrame | null }): () => void {
+  return () => {
+    holder.current?.close();
+    holder.current = null;
+  };
+}
+
 class Internals implements ElementReceiver {
   readonly element: WorkerVideoElement;
   readonly bridge: Bridge;
@@ -119,17 +134,45 @@ class Internals implements ElementReceiver {
   readonly handlers = new Map<string, { handler: EventHandler; listener: (event: Event) => void }>();
   loadSeq = 0;
   disposed = false;
+  readonly ready: Promise<void>;
 
-  constructor(element: WorkerVideoElement, bridge: Bridge) {
+  constructor(element: WorkerVideoElement, bridge: Bridge, selector?: string) {
     this.element = element;
     this.bridge = bridge;
     this.id = bridge.nextId();
-    const frame = this.frame;
-    bridge.register(this.id, element, this, () => {
-      frame.current?.close();
-      frame.current = null;
-    });
-    bridge.post({ kind: "create", id: this.id, props: {} });
+    bridge.register(this.id, element, this, frameReleaser(this.frame));
+    if (selector === undefined) {
+      bridge.post({ kind: "create", id: this.id, props: {} });
+      this.ready = Promise.resolve();
+    } else {
+      this.ready = this.connect(selector);
+    }
+  }
+
+  async connect(selector: string): Promise<void> {
+    const [seq, result] = this.bridge.call({ kind: "connect", id: this.id, selector });
+    const connected = (await result) as ConnectResult;
+    this.applyState(seq, connected.state);
+    this.setFrame(connected.frame);
+  }
+
+  markProps(seq: number, ...props: string[]): void {
+    if (!seq) return;
+    for (const prop of props) this.localWrites.set(`props.${prop}`, seq);
+  }
+
+  applyProps(ack: number, props: Record<string, unknown>): void {
+    for (const [prop, value] of Object.entries(props)) {
+      const key = `props.${prop}`;
+      const pending = this.localWrites.get(key);
+      if (pending !== undefined) {
+        if (pending > ack) continue;
+        this.localWrites.delete(key);
+      }
+      if (prop === "src") this.src = value as string;
+      else if (prop === "hasSrcAttribute") this.hasSrcAttribute = value as boolean;
+      else if (prop in this.props) (this.props as unknown as Record<string, unknown>)[prop] = value;
+    }
   }
 
   write(prop: string, value: unknown, local: Partial<MediaState> = {}, transfer?: Transferable[]): number {
@@ -171,6 +214,10 @@ class Internals implements ElementReceiver {
   applyState(ack: number, state: MediaState): void {
     const target = this.state as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(state)) {
+      if (key === "props") {
+        this.applyProps(ack, value as Record<string, unknown>);
+        continue;
+      }
       const pending = this.localWrites.get(key);
       if (pending !== undefined) {
         if (pending > ack) continue;
@@ -287,7 +334,7 @@ export class WorkerVideoElement extends EventTarget {
     super();
     const bridge = bridgeFor(options.transport);
     bridge.watchForHost();
-    internals.set(this, new Internals(this, bridge));
+    internals.set(this, new Internals(this, bridge, (options as InternalOptions)[CONNECT]));
   }
 
   get currentFrame(): VideoFrame | null {
@@ -322,7 +369,9 @@ export class WorkerVideoElement extends EventTarget {
     const core = $(this);
     core.src = core.resolveUrl(String(value));
     core.hasSrcAttribute = true;
-    core.markLoad(core.write("src", core.src, { ...LOAD_RESET, currentSrc: "", networkState: 0 }));
+    const seq = core.write("src", core.src, { ...LOAD_RESET, currentSrc: "", networkState: 0 });
+    core.markLoad(seq);
+    core.markProps(seq, "src", "hasSrcAttribute");
   }
 
   get srcObject(): unknown {
@@ -515,7 +564,7 @@ export class WorkerVideoElement extends EventTarget {
   #mirror<K extends keyof MirroredProps>(prop: K, value: MirroredProps[K]): void {
     const core = $(this);
     core.props[prop] = value;
-    core.write(prop, value);
+    core.markProps(core.write(prop, value), prop);
   }
 
   getAttribute(name: string): string | null {
@@ -561,7 +610,7 @@ export class WorkerVideoElement extends EventTarget {
     if (attribute.prop === "src") {
       core.src = "";
       core.hasSrcAttribute = false;
-      core.invoke("removeAttribute", ["src"]);
+      core.markProps(core.invoke("removeAttribute", ["src"]), "src", "hasSrcAttribute");
       return;
     }
     const target = this as unknown as Record<string, unknown>;
@@ -698,4 +747,22 @@ for (const type of MEDIA_EVENTS) {
 
 export function createVideoElement(options?: CreateVideoElementOptions): WorkerVideoElement {
   return new WorkerVideoElement(options);
+}
+
+export function connectToHostVideo(
+  selector: string,
+  options: CreateVideoElementOptions = {},
+): Promise<WorkerVideoElement> {
+  assertWorker("connectToHostVideo()");
+  if (typeof selector !== "string" || selector.trim() === "") {
+    throw new TypeError("html-video-element-webworker-polyfill: connectToHostVideo() expects a CSS selector string.");
+  }
+  const video = new WorkerVideoElement({ ...options, [CONNECT]: selector } as InternalOptions);
+  return $(video).ready.then(
+    () => video,
+    (error: unknown) => {
+      video.dispose();
+      throw error;
+    },
+  );
 }

@@ -20,6 +20,7 @@ const WORKER_ONLY_CALLS: Array<[string, () => unknown]> = [
   ["polyfillCreateImageBitmap()", () => lib.polyfillCreateImageBitmap()],
   ["polyfillVideoFrame()", () => lib.polyfillVideoFrame()],
   ["installWorkerPolyfills()", () => lib.installWorkerPolyfills()],
+  ["connectToHostVideo()", () => lib.connectToHostVideo("#player")],
 ];
 
 function errorOf(call: () => unknown): unknown {

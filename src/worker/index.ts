@@ -5,6 +5,7 @@ export {
   type CreateVideoElementOptions,
   type VideoFrameRequestCallback,
   WorkerVideoElement,
+  connectToHostVideo,
   createVideoElement,
 } from "./video-element.ts";
 export type { FrameMetadata, MessageEndpoint } from "../shared/protocol.ts";

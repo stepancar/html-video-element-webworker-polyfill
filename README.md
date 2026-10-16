@@ -78,17 +78,30 @@ video.requestVideoFrameCallback(function onFrame() {
 video.dispose();
 ```
 
+Or take control of a `<video>` that is already on the page:
+
+```ts
+import { connectToHostVideo } from "html-video-element-webworker-polyfill/worker";
+
+const video = await connectToHostVideo("#player");
+video.currentTime = 10;
+```
+
+The element stays where it is. Changes made by the page, such as native controls or other scripts, reach the worker,
+and `dispose()` only releases control. Pass `canConnect` to `createVideoHost` to restrict which elements a worker may
+take over.
+
 ## API
 
-| Import                                               | Exports                                                                                                                                       |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `html-video-element-webworker-polyfill/host`         | `createVideoHost(worker, { container? })` — main thread                                                                                       |
-| `html-video-element-webworker-polyfill/worker`       | `createVideoElement()`, `WorkerVideoElement`, `polyfillDocument()` — [`document.createElement`][createElement]                                |
-| `html-video-element-webworker-polyfill/canvas2d`     | `polyfill2dCanvasApi()` — [`drawImage`][drawImage], [`createPattern`][createPattern]                                                          |
-| `html-video-element-webworker-polyfill/webgl`        | `polyfillWebglAPI()` — [`texImage2D`][texImage2D] and friends, [WebGL][WebGL] 1 and 2                                                         |
-| `html-video-element-webworker-polyfill/webgpu`       | `polyfillWebgpu()` — [`copyExternalImageToTexture`][copyExternalImageToTexture], [`importExternalTexture`][importExternalTexture]             |
-| `html-video-element-webworker-polyfill/image-bitmap` | `polyfillCreateImageBitmap()` — [`createImageBitmap`][createImageBitmap], `polyfillVideoFrame()` — [`new VideoFrame`][VideoFrame constructor] |
-| `html-video-element-webworker-polyfill/auto`         | installs every worker polyfill                                                                                                                |
+| Import                                               | Exports                                                                                                                                        |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `html-video-element-webworker-polyfill/host`         | `createVideoHost(worker, { container?, canConnect? })` — main thread                                                                           |
+| `html-video-element-webworker-polyfill/worker`       | `createVideoElement()`, `connectToHostVideo(selector)`, `WorkerVideoElement`, `polyfillDocument()` — [`document.createElement`][createElement] |
+| `html-video-element-webworker-polyfill/canvas2d`     | `polyfill2dCanvasApi()` — [`drawImage`][drawImage], [`createPattern`][createPattern]                                                           |
+| `html-video-element-webworker-polyfill/webgl`        | `polyfillWebglAPI()` — [`texImage2D`][texImage2D] and friends, [WebGL][WebGL] 1 and 2                                                          |
+| `html-video-element-webworker-polyfill/webgpu`       | `polyfillWebgpu()` — [`copyExternalImageToTexture`][copyExternalImageToTexture], [`importExternalTexture`][importExternalTexture]              |
+| `html-video-element-webworker-polyfill/image-bitmap` | `polyfillCreateImageBitmap()` — [`createImageBitmap`][createImageBitmap], `polyfillVideoFrame()` — [`new VideoFrame`][VideoFrame constructor]  |
+| `html-video-element-webworker-polyfill/auto`         | installs every worker polyfill                                                                                                                 |
 
 Each entry point is tree-shakeable, so you only ship what you import.
 

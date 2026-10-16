@@ -1,4 +1,4 @@
-import { type VideoHost, createVideoHost } from "html-video-element-webworker-polyfill/host";
+import { type VideoHost, type VideoHostOptions, createVideoHost } from "html-video-element-webworker-polyfill/host";
 import type { Lib } from "./worker-harness.ts";
 import colorsUrl from "./fixtures/colors.webm?url";
 import patternUrl from "./fixtures/pattern.webm?url";
@@ -17,9 +17,12 @@ export interface TestWorker {
 
 let nextCall = 1;
 
-export function startWorker({ host: withHost = true }: { host?: boolean } = {}): TestWorker {
+export function startWorker({
+  host: withHost = true,
+  hostOptions,
+}: { host?: boolean; hostOptions?: VideoHostOptions } = {}): TestWorker {
   const worker = new Worker(new URL("./worker-harness.ts", import.meta.url), { type: "module" });
-  const host = withHost ? createVideoHost(worker) : null;
+  const host = withHost ? createVideoHost(worker, hostOptions) : null;
   const pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   worker.addEventListener("message", (event: MessageEvent) => {
     const data = event.data as {

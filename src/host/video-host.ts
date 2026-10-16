@@ -19,6 +19,7 @@ export interface VideoHostOptions {
   container?: HTMLElement | null;
   onVideoCreated?: (video: HTMLVideoElement, id: number) => void;
   onVideoDisposed?: (video: HTMLVideoElement, id: number) => void;
+  canConnect?: (video: HTMLVideoElement, selector: string) => boolean;
 }
 
 export interface VideoHost {
@@ -36,6 +37,7 @@ const SILENT_STATE_POLLS = 32;
 
 interface Entry {
   video: HTMLVideoElement;
+  adopted: boolean;
   frameCallback: number | null;
   frameInFlight: boolean;
   pendingFrame: { frame: VideoFrame; metadata: FrameMetadata } | null;
@@ -119,11 +121,10 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     }
   };
 
-  const create = (id: number): void => {
-    const video = document.createElement("video");
-    video.playsInline = true;
+  const attach = (id: number, video: HTMLVideoElement, adopted: boolean): Entry => {
     const entry: Entry = {
       video,
+      adopted,
       frameCallback: null,
       lastFrameTimestamp: null,
       frameInFlight: false,
@@ -254,8 +255,50 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
 
     entries.set(id, entry);
     videos.set(id, video);
+    return entry;
+  };
+
+  const create = (id: number): void => {
+    const video = document.createElement("video");
+    video.playsInline = true;
+    attach(id, video, false);
     options.container?.append(video);
     options.onVideoCreated?.(video, id);
+  };
+
+  const connect = (id: number, selector: string, callId: number | undefined): void => {
+    const reply = (value: unknown, transfer: Transferable[] = []): void => {
+      if (callId !== undefined) post({ kind: "result", callId, value }, transfer);
+    };
+    const fail = (name: string, message: string): void => {
+      if (callId !== undefined) post({ kind: "result", callId, error: { name, message } });
+    };
+    let found: Element | null;
+    try {
+      found = document.querySelector(selector);
+    } catch (error) {
+      fail("SyntaxError", (error as Error).message);
+      return;
+    }
+    if (!found) {
+      fail("NotFoundError", `connectToHostVideo(): no element matches "${selector}" on the main thread.`);
+      return;
+    }
+    if (!(found instanceof HTMLVideoElement)) {
+      fail(
+        "InvalidNodeTypeError",
+        `connectToHostVideo(): "${selector}" matches a <${found.localName}>, not a <video>.`,
+      );
+      return;
+    }
+    if (options.canConnect && !options.canConnect(found, selector)) {
+      fail("NotAllowedError", `connectToHostVideo(): the host does not allow connecting to "${selector}".`);
+      return;
+    }
+    const entry = attach(id, found, true);
+    const frame = captureFrame(entry);
+    if (frame) entry.lastFrameTimestamp = frame.timestamp;
+    reply({ state: snapshot(found), frame }, frame ? [frame] : []);
   };
 
   const release = (id: number): void => {
@@ -265,8 +308,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     videos.delete(id);
     sentNetworkState.delete(id);
     const { video } = entry;
-    options.onVideoDisposed?.(video, id);
     entry.detach();
+    if (entry.adopted) return;
+    options.onVideoDisposed?.(video, id);
     video.pause();
     video.removeAttribute("src");
     video.srcObject = null;
@@ -289,6 +333,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       case "create":
         create(message.id);
         break;
+      case "connect":
+        connect(message.id, message.selector, message.callId);
+        return;
       case "dispose":
         release(message.id);
         return;
@@ -412,7 +459,16 @@ function snapshot(video: HTMLVideoElement): MediaState {
           totalVideoFrames: quality.totalVideoFrames,
         }
       : null,
+    props: snapshotProps(video),
   };
+}
+
+function snapshotProps(video: HTMLVideoElement): Record<string, unknown> {
+  const props: Record<string, unknown> = {};
+  for (const prop of MIRRORED_PROPERTIES) props[prop] = (video as unknown as Record<string, unknown>)[prop];
+  props.hasSrcAttribute = video.hasAttribute("src");
+  props.src = props.hasSrcAttribute ? video.src : "";
+  return props;
 }
 
 function toMetadata(metadata: VideoFrameCallbackMetadata): FrameMetadata {

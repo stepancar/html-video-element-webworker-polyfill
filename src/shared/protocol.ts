@@ -80,6 +80,12 @@ export interface MediaState {
   played: Ranges;
   seekable: Ranges;
   quality: SerializedPlaybackQuality | null;
+  props: Record<string, unknown>;
+}
+
+export interface ConnectResult {
+  state: MediaState;
+  frame: VideoFrame | null;
 }
 
 export interface FrameMetadata {
@@ -112,6 +118,7 @@ export type ClientMessage =
       args: unknown[];
       callId?: number;
     }
+  | { [CHANNEL]: 1; kind: "connect"; id: number; seq: number; selector: string; callId?: number }
   | { [CHANNEL]: 1; kind: "dispose"; id: number; seq: number }
   | { [CHANNEL]: 1; kind: "canPlayType"; type: string; callId: number }
   | { [CHANNEL]: 1; kind: "frameAck"; id: number; seq: number }

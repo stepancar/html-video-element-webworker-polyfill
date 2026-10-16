@@ -73,7 +73,7 @@ export class Bridge {
     return seq;
   }
 
-  call(message: OutgoingMessage & { kind: "call" }, transfer?: Transferable[]): [number, Promise<unknown>] {
+  call(message: OutgoingMessage & { kind: "call" | "connect" }, transfer?: Transferable[]): [number, Promise<unknown>] {
     const callId = this.#nextCallId++;
     const promise = new Promise((resolve, reject) => this.#calls.set(callId, { resolve, reject }));
     return [this.post({ ...message, callId }, transfer), promise];
