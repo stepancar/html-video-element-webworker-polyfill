@@ -27,12 +27,16 @@ export class Bridge {
   timeOffset = 0;
 
   #seq = 0;
+  #outbox: Array<Record<string, unknown>> = [];
+  #outboxTransfer: Transferable[] = [];
+  #flushScheduled = false;
   #nextId = 1;
   #nextCallId = 1;
   readonly #receivers = new Map<number, WeakRef<ElementReceiver>>();
   readonly #pinned = new Set<object>();
   readonly #calls = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
   readonly #canPlayType = new Map<string, CanPlayTypeResult>();
+  readonly #ids = new Map<string, WeakRef<{ disposed: boolean }>>();
   readonly #registry: FinalizationRegistry<Finalizable> | null;
   #welcomed = false;
   #missingHostTimer: ReturnType<typeof setTimeout> | undefined;
@@ -69,9 +73,24 @@ export class Bridge {
 
   post(message: OutgoingMessage, transfer: Transferable[] = []): number {
     const seq = ++this.#seq;
-    this.endpoint.postMessage({ ...message, [CHANNEL]: 1, seq }, transfer);
+    this.#outbox.push({ ...message, [CHANNEL]: 1, seq });
+    this.#outboxTransfer.push(...transfer);
+    if (!this.#flushScheduled) {
+      this.#flushScheduled = true;
+      queueMicrotask(this.#flush);
+    }
     return seq;
   }
+
+  #flush = (): void => {
+    this.#flushScheduled = false;
+    const messages = this.#outbox;
+    const transfer = this.#outboxTransfer;
+    this.#outbox = [];
+    this.#outboxTransfer = [];
+    if (messages.length === 1) this.endpoint.postMessage(messages[0], transfer);
+    else if (messages.length > 1) this.endpoint.postMessage({ [CHANNEL]: 1, kind: "batch", messages }, transfer);
+  };
 
   call(message: OutgoingMessage & { kind: "call" | "connect" }, transfer?: Transferable[]): [number, Promise<unknown>] {
     const callId = this.#nextCallId++;
@@ -88,6 +107,22 @@ export class Bridge {
     this.#receivers.delete(id);
     this.#registry?.unregister(receiver);
     this.#pinned.delete(element);
+  }
+
+  claimId(id: string, element: { disposed: boolean }): void {
+    if (id === "") return;
+    const owner = this.#ids.get(id)?.deref();
+    if (owner && owner !== element && !owner.disposed) {
+      throw new DOMException(
+        `html-video-element-webworker-polyfill: a video element with id "${id}" already exists in this worker.`,
+        "InvalidStateError",
+      );
+    }
+    this.#ids.set(id, new WeakRef(element));
+  }
+
+  releaseId(id: string, element: object): void {
+    if (this.#ids.get(id)?.deref() === element) this.#ids.delete(id);
   }
 
   pin(element: object, pinned: boolean): void {

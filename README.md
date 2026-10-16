@@ -78,6 +78,22 @@ video.requestVideoFrameCallback(function onFrame() {
 video.dispose();
 ```
 
+Set an `id` right after creating an element to find its real `<video>` on the main thread, for example to put it on
+the page. Existing `document.createElement("video")` code works unchanged:
+
+```ts
+createVideoHost(worker, {
+  onVideoCreated(video) {
+    if (video.id === "preview") document.querySelector("#slot")!.append(video);
+  },
+});
+```
+
+```ts
+const video = document.createElement("video");
+video.id = "preview";
+```
+
 Or take control of a `<video>` that is already on the page:
 
 ```ts
@@ -95,7 +111,7 @@ take over.
 
 | Import                                               | Exports                                                                                                                                        |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `html-video-element-webworker-polyfill/host`         | `createVideoHost(worker, { container?, canConnect? })` — main thread                                                                           |
+| `html-video-element-webworker-polyfill/host`         | `createVideoHost(worker, { container?, onVideoCreated?, canConnect? })` — main thread                                                          |
 | `html-video-element-webworker-polyfill/worker`       | `createVideoElement()`, `connectToHostVideo(selector)`, `WorkerVideoElement`, `polyfillDocument()` — [`document.createElement`][createElement] |
 | `html-video-element-webworker-polyfill/canvas2d`     | `polyfill2dCanvasApi()` — [`drawImage`][drawImage], [`createPattern`][createPattern]                                                           |
 | `html-video-element-webworker-polyfill/webgl`        | `polyfillWebglAPI()` — [`texImage2D`][texImage2D] and friends, [WebGL][WebGL] 1 and 2                                                          |

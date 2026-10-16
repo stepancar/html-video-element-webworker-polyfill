@@ -17,8 +17,8 @@ import { assertMainThread, isMainThread, isMessageEndpoint } from "../shared/env
 
 export interface VideoHostOptions {
   container?: HTMLElement | null;
-  onVideoCreated?: (video: HTMLVideoElement, id: number) => void;
-  onVideoDisposed?: (video: HTMLVideoElement, id: number) => void;
+  onVideoCreated?: (video: HTMLVideoElement) => void;
+  onVideoDisposed?: (video: HTMLVideoElement) => void;
   canConnect?: (video: HTMLVideoElement, selector: string) => boolean;
 }
 
@@ -48,6 +48,7 @@ interface Entry {
 }
 
 const FRAME_WAIT_TIMEOUT = 500;
+const CONNECT_FRAME_ATTEMPTS = 30;
 const TIMESTAMP_EPSILON = 1000;
 
 const hosted = new WeakSet<object>();
@@ -111,15 +112,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     post({ kind: "welcome", timeOrigin: performance.timeOrigin, canPlayType });
   };
 
-  const captureFrame = (entry: Entry): VideoFrame | null => {
-    const { video } = entry;
-    if (video.readyState < 2 || typeof VideoFrame !== "function") return null;
-    try {
-      return new VideoFrame(video);
-    } catch {
-      return null;
-    }
-  };
+  const captureFrame = (entry: Entry): VideoFrame | null => captureVideoFrame(entry.video);
 
   const attach = (id: number, video: HTMLVideoElement, adopted: boolean): Entry => {
     const entry: Entry = {
@@ -258,12 +251,14 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     return entry;
   };
 
-  const create = (id: number): void => {
+  const create = (id: number, props: Record<string, unknown>): void => {
     const video = document.createElement("video");
     video.playsInline = true;
+    if (typeof props.id === "string") video.id = props.id;
     attach(id, video, false);
     options.container?.append(video);
-    options.onVideoCreated?.(video, id);
+    if (batch) batch.created.push(video);
+    else options.onVideoCreated?.(video);
   };
 
   const connect = (id: number, selector: string, callId: number | undefined): void => {
@@ -295,10 +290,19 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       fail("NotAllowedError", `connectToHostVideo(): the host does not allow connecting to "${selector}".`);
       return;
     }
-    const entry = attach(id, found, true);
-    const frame = captureFrame(entry);
-    if (frame) entry.lastFrameTimestamp = frame.timestamp;
-    reply({ state: snapshot(found), frame }, frame ? [frame] : []);
+    const video = found;
+    const finish = (attempt: number): void => {
+      if (disposed) return;
+      const frame = captureVideoFrame(video);
+      if (!frame && video.readyState >= 2 && attempt < CONNECT_FRAME_ATTEMPTS) {
+        setTimeout(() => finish(attempt + 1), SILENT_STATE_POLL_INTERVAL);
+        return;
+      }
+      const entry = attach(id, video, true);
+      if (frame) entry.lastFrameTimestamp = frame.timestamp;
+      reply({ state: snapshot(video), frame }, frame ? [frame] : []);
+    };
+    finish(0);
   };
 
   const release = (id: number): void => {
@@ -310,7 +314,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     const { video } = entry;
     entry.detach();
     if (entry.adopted) return;
-    options.onVideoDisposed?.(video, id);
+    options.onVideoDisposed?.(video);
     video.pause();
     video.removeAttribute("src");
     video.srcObject = null;
@@ -318,9 +322,30 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
     video.remove();
   };
 
+  let batch: { created: HTMLVideoElement[]; touched: Map<number, HTMLVideoElement> } | null = null;
+
+  const handleBatch = (messages: ClientMessage[]): void => {
+    const current = { created: [] as HTMLVideoElement[], touched: new Map<number, HTMLVideoElement>() };
+    batch = current;
+    try {
+      for (const message of messages) handle(message);
+    } finally {
+      batch = null;
+    }
+    for (const [id, video] of current.touched) {
+      if (entries.get(id)?.video === video) sendState(id, video);
+    }
+    for (const video of current.created) {
+      if ([...videos.values()].includes(video)) options.onVideoCreated?.(video);
+    }
+  };
+
   const handle = (message: ClientMessage): void => {
     if ("seq" in message) ack = Math.max(ack, message.seq);
     switch (message.kind) {
+      case "batch":
+        handleBatch(message.messages);
+        return;
       case "hello":
         welcome();
         return;
@@ -331,7 +356,7 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
         post({ kind: "result", callId: message.callId, value: probeCanPlayType(message.type) });
         return;
       case "create":
-        create(message.id);
+        create(message.id, message.props);
         break;
       case "connect":
         connect(message.id, message.selector, message.callId);
@@ -367,7 +392,9 @@ export function createVideoHost(endpoint: MessageEndpoint, options: VideoHostOpt
       }
     }
     const video = entries.get(message.id)?.video;
-    if (video) sendState(message.id, video);
+    if (!video) return;
+    if (batch) batch.touched.set(message.id, video);
+    else sendState(message.id, video);
   };
 
   const onMessage = (event: MessageEvent): void => {
@@ -461,6 +488,15 @@ function snapshot(video: HTMLVideoElement): MediaState {
       : null,
     props: snapshotProps(video),
   };
+}
+
+function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
+  if (video.readyState < 2 || typeof VideoFrame !== "function") return null;
+  try {
+    return new VideoFrame(video);
+  } catch {
+    return null;
+  }
 }
 
 function snapshotProps(video: HTMLVideoElement): Record<string, unknown> {

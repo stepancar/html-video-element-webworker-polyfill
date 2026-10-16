@@ -37,6 +37,7 @@ export const MIRRORED_PROPERTIES: readonly string[] = [
   "disablePictureInPicture",
   "disableRemotePlayback",
   "height",
+  "id",
   "loop",
   "muted",
   "playbackRate",
@@ -122,7 +123,8 @@ export type ClientMessage =
   | { [CHANNEL]: 1; kind: "dispose"; id: number; seq: number }
   | { [CHANNEL]: 1; kind: "canPlayType"; type: string; callId: number }
   | { [CHANNEL]: 1; kind: "frameAck"; id: number; seq: number }
-  | { [CHANNEL]: 1; kind: "hello" };
+  | { [CHANNEL]: 1; kind: "hello" }
+  | { [CHANNEL]: 1; kind: "batch"; messages: ClientMessage[] };
 
 export type HostMessage =
   | {

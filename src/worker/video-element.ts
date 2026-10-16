@@ -35,6 +35,7 @@ interface MirroredProps {
   disablePictureInPicture: boolean;
   disableRemotePlayback: boolean;
   height: number;
+  id: string;
   loop: boolean;
   playsInline: boolean;
   poster: string;
@@ -94,6 +95,7 @@ const ATTRIBUTES: Record<string, { prop: string; type: "bool" | "string" | "numb
   preload: { prop: "preload", type: "string" },
   src: { prop: "src", type: "string" },
   width: { prop: "width", type: "number" },
+  id: { prop: "id", type: "string" },
 };
 
 function frameReleaser(holder: { current: VideoFrame | null }): () => void {
@@ -117,6 +119,7 @@ class Internals implements ElementReceiver {
     disablePictureInPicture: false,
     disableRemotePlayback: false,
     height: 0,
+    id: "",
     loop: false,
     playsInline: false,
     poster: "",
@@ -153,7 +156,7 @@ class Internals implements ElementReceiver {
     const [seq, result] = this.bridge.call({ kind: "connect", id: this.id, selector });
     const connected = (await result) as ConnectResult;
     this.applyState(seq, connected.state);
-    this.setFrame(connected.frame);
+    if (connected.frame) this.setFrame(connected.frame);
   }
 
   markProps(seq: number, ...props: string[]): void {
@@ -354,6 +357,7 @@ export class WorkerVideoElement extends EventTarget {
     core.setFrame(null);
     core.frameCallbacks.clear();
     core.bridge.unregister(core.id, core, this);
+    core.bridge.releaseId(core.props.id, this);
     core.state = { ...EMPTY_STATE };
     core.localWrites.clear();
   }
@@ -517,6 +521,17 @@ export class WorkerVideoElement extends EventTarget {
   set disableRemotePlayback(value: boolean) {
     this.#mirror("disableRemotePlayback", Boolean(value));
   }
+  get id(): string {
+    return $(this).props.id;
+  }
+  set id(value: string) {
+    const core = $(this);
+    const id = String(value);
+    core.bridge.claimId(id, this);
+    if (core.props.id !== id) core.bridge.releaseId(core.props.id, this);
+    this.#mirror("id", id);
+  }
+
   get height(): number {
     return $(this).props.height;
   }
