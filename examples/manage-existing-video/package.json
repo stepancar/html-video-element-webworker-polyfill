@@ -1,5 +1,5 @@
 {
-  "name": "html-video-element-webworker-polyfill-control-existing-video",
+  "name": "html-video-element-webworker-polyfill-manage-existing-video",
   "version": "1.0.0",
   "private": true,
   "type": "module",

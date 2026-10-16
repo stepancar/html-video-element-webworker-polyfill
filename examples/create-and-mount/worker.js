@@ -4,7 +4,6 @@ polyfillDocument();
 
 const video = document.createElement("video");
 video.id = "from-worker";
-video.controls = true;
 video.muted = true;
 video.loop = true;
 video.crossOrigin = "anonymous";

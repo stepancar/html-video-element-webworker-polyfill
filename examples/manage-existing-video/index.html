@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Control an existing video from a worker</title>
+    <title>Manage an existing video from a worker</title>
     <style>
       body {
         max-width: 720px;
@@ -21,11 +21,11 @@
     </style>
   </head>
   <body>
-    <h1>Control an existing &lt;video&gt; from a worker</h1>
+    <h1>Manage an existing &lt;video&gt; from a worker</h1>
     <p>
       This is a regular video on the page. A Web Worker took control of it and jumps to a random frame every second.
     </p>
-    <video id="player" controls muted src="bunny.webm"></video>
+    <video id="player" muted src="bunny.webm"></video>
     <p id="log">Waiting for the worker…</p>
     <p><small>Big Buck Bunny © Blender Foundation, CC BY 3.0.</small></p>
     <script type="module" src="./main.js"></script>
