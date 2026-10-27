@@ -259,12 +259,15 @@ describe("dispose", () => {
     element.addEventListener("loadstart", () => (loadStarted = true));
 
     // Act
-    const play = element.play();
+    const playError = element.play().then(
+      () => null,
+      (error: unknown) => error,
+    );
     element.src = url;
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Assert
-    await expect(play).rejects.toMatchObject({ name: "InvalidStateError" });
+    expect(await playError).toMatchObject({ name: "InvalidStateError" });
     expect(loadStarted).toBe(false);
     expect(element.currentFrame).toBeNull();
   });
