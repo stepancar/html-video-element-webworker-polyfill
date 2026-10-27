@@ -351,6 +351,12 @@ export class CanvasVideoElement extends EventTarget {
     this.#teardown();
     this.#audioSink?.close();
     this.#frameCallbacks.clear();
+    this.#readyState = 0;
+    this.#networkState = 0;
+    this.#paused = true;
+    this.#seeking = false;
+    this.#ended = false;
+    this.#loadedData = false;
   }
 
   [Symbol.dispose](): void {

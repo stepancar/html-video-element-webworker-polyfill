@@ -224,6 +224,82 @@ for (const [name, { url, codec }] of Object.entries(SOURCES)) {
   });
 }
 
+describe("dispose", () => {
+  const url = SOURCES["VP9 WebM"].url;
+
+  test("releases the frame, resets the state and stops all events", async () => {
+    // Arrange
+    const element = await loaded(url);
+    await element.play();
+    const events: string[] = [];
+    for (const type of ["timeupdate", "seeked", "pause", "ended", "progress", "waiting"]) {
+      element.addEventListener(type, () => events.push(type));
+    }
+
+    // Act
+    element.currentTime = 2;
+    element.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // Assert
+    expect(element.disposed).toBe(true);
+    expect(element.currentFrame).toBeNull();
+    expect(element.readyState).toBe(0);
+    expect(element.networkState).toBe(0);
+    expect(element.paused).toBe(true);
+    expect(element.seeking).toBe(false);
+    expect(events).toEqual([]);
+  });
+
+  test("rejects play() and ignores new sources afterwards", async () => {
+    // Arrange
+    const element = await loaded(url);
+    element.dispose();
+    let loadStarted = false;
+    element.addEventListener("loadstart", () => (loadStarted = true));
+
+    // Act
+    const play = element.play();
+    element.src = url;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Assert
+    await expect(play).rejects.toMatchObject({ name: "InvalidStateError" });
+    expect(loadStarted).toBe(false);
+    expect(element.currentFrame).toBeNull();
+  });
+
+  test("can be disposed while it is still loading", async () => {
+    // Arrange
+    const element = createVideo();
+    const events: string[] = [];
+    for (const type of ["loadedmetadata", "loadeddata", "error"]) {
+      element.addEventListener(type, () => events.push(type));
+    }
+
+    // Act
+    element.src = url;
+    element.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Assert
+    expect(events).toEqual([]);
+    expect(element.currentFrame).toBeNull();
+  });
+
+  test("works with the using declaration", async () => {
+    // Arrange
+    const element = await loaded(url);
+
+    // Act
+    element[Symbol.dispose]();
+
+    // Assert
+    expect(element.disposed).toBe(true);
+    expect(element.currentFrame).toBeNull();
+  });
+});
+
 test("reports MEDIA_ERR_SRC_NOT_SUPPORTED for a file that is not media", async () => {
   // Arrange
   const element = createVideo();
