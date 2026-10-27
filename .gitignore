@@ -153,3 +153,4 @@ dist/
 demo/dist/
 .vitest/
 __traces__/
+bench/fixtures/

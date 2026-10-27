@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frame-by-frame CanvasVideoElement</title>
+    <meta
+      name="description"
+      content="A video element that decodes with WebCodecs onto its own canvas: instant frame stepping, byte-range loading, works in workers and in background tabs."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235b45e0'/><path d='M9 9h3v14H9zM14 9l10 7-10 7z' fill='white'/></svg>"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./frames/frames.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="eyebrow">html-video-element-webworker-polyfill/canvas-video</p>
+      <h1>Frame-by-frame video, no &lt;video&gt;</h1>
+      <p class="lead">
+        <code>CanvasVideoElement</code> has the <code>HTMLVideoElement</code> API, but decodes with WebCodecs onto its
+        own canvas. Stepping <code>currentTime</code> forward one frame at a time runs as fast as the decoder itself, in
+        a Web Worker or on the main thread.
+      </p>
+      <div class="links">
+        <a class="button primary" href="https://github.com/stepancar/html-video-element-webworker-polyfill">GitHub</a>
+        <a class="button" href="./index.html">Worker polyfill demo</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="demo" aria-labelledby="demo-title">
+        <h2 id="demo-title" class="visually-hidden">Live demo</h2>
+
+        <div class="pipeline">
+          <figure class="panel">
+            <figcaption>
+              <span class="tag" id="source-tag">Web Worker</span>
+              <strong>CanvasVideoElement</strong>
+              <span>Decodes with WebCodecs and draws every frame onto its own canvas.</span>
+            </figcaption>
+            <div class="screen" id="source-slot"></div>
+          </figure>
+
+          <div class="arrow" aria-hidden="true">
+            <svg viewBox="0 0 48 24"><path d="M2 12h40M34 4l8 8-8 8" /></svg>
+            <span>VideoFrame</span>
+          </div>
+
+          <figure class="panel">
+            <figcaption>
+              <span class="tag" id="output-tag">Web Worker</span>
+              <strong>Processed frame</strong>
+              <span>Uploaded to WebGL as a texture and filtered in a shader.</span>
+            </figcaption>
+            <div class="screen" id="output-slot"></div>
+            <div id="error" class="error-line" hidden></div>
+          </figure>
+        </div>
+
+        <div class="transport">
+          <button
+            id="prev"
+            class="icon-button secondary"
+            type="button"
+            aria-label="Previous frame"
+            title="Previous frame (←)"
+          >
+            <svg viewBox="0 0 24 24"><path d="M6 5h3v14H6zM20 5v14L10 12z" /></svg>
+          </button>
+          <button id="play" class="icon-button" type="button" aria-label="Play" title="Play (space)">
+            <svg viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z" /></svg>
+            <svg viewBox="0 0 24 24" class="icon-pause"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+          </button>
+          <button id="next" class="icon-button secondary" type="button" aria-label="Next frame" title="Next frame (→)">
+            <svg viewBox="0 0 24 24"><path d="M15 5h3v14h-3zM4 5v14l10-7z" /></svg>
+          </button>
+          <input id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="Frame" />
+          <span id="time" class="time frame-time">–</span>
+        </div>
+
+        <div class="stats" aria-live="polite">
+          <div class="stat run-stat">
+            <span class="stat-label">Process every frame</span>
+            <span class="stat-value"><span id="stat-run">–</span><small>frames/s</small></span>
+            <span class="stat-note" id="run-note">Sets currentTime frame by frame and filters each frame.</span>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <button id="run" class="button primary" type="button">Process every frame</button>
+        </div>
+
+        <div class="controls">
+          <fieldset>
+            <legend>Run on</legend>
+            <div class="segmented" id="mode">
+              <button type="button" data-mode="worker" aria-pressed="true">Web Worker</button>
+              <button type="button" data-mode="main" aria-pressed="false">Main thread</button>
+            </div>
+            <p class="hint">The same code runs in both places.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Filter</legend>
+            <div class="chips" id="effects"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Video</legend>
+            <div class="chips" id="sources"></div>
+            <label class="file">
+              <input id="file" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" />
+              <span>Open a local file…</span>
+            </label>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="how" aria-labelledby="how-title">
+        <h2 id="how-title">How it works</h2>
+        <p>
+          The pipeline mirrors ffplay. Mediabunny demuxes MP4 and WebM from HTTP byte ranges into packets. A read loop
+          keeps a few seconds of packets queued, a decode loop feeds one long-lived <code>VideoDecoder</code>, and a
+          presenter picks the frame for the clock or for the seek target. A seek that lands ahead in the same GOP keeps
+          decoding forward. Any other seek bumps a serial number, resets the same decoder and drops stale packets and
+          frames. Events go through a <code>MessageChannel</code> instead of timers, so nothing waits for a hidden tab.
+        </p>
+        <div class="code-grid">
+          <div>
+            <h3>worker.js</h3>
+            <pre><code class="language-javascript">import { CanvasVideoElement } from "html-video-element-webworker-polyfill/canvas-video";
+
+const video = new CanvasVideoElement({ canvas: offscreenCanvas });
+video.src = "movie.mp4";
+await new Promise((resolve) => (video.onloadeddata = resolve));
+
+for (let i = 0; i &lt; frameCount; i++) {
+  video.currentTime = (i + 0.5) / fps;
+  await new Promise((resolve) => (video.onseeked = resolve));
+  process(video.currentFrame);
+}</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      Sample film: <em>Big Buck Bunny</em> © Blender Foundation, CC BY 3.0, streamed from Wikimedia Commons with HTTP
+      range requests.
+    </footer>
+
+    <script type="module" src="./frames/main.ts"></script>
+  </body>
+</html>

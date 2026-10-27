@@ -10,6 +10,7 @@ export default defineConfig({
     webgpu: "src/polyfills/webgpu.ts",
     "image-bitmap": "src/polyfills/image-bitmap.ts",
     auto: "src/auto.ts",
+    "canvas-video": "src/canvas-video/index.ts",
   },
   format: "esm",
   platform: "browser",

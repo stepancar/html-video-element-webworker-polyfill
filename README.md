@@ -107,6 +107,44 @@ video.play();
 
 [Open in StackBlitz][example-create]
 
+## 4. Step through frames without `<video>`: `CanvasVideoElement`
+
+`CanvasVideoElement` has the `HTMLVideoElement` API but decodes with [WebCodecs][WebCodecs] onto its own canvas, so it
+needs no host and works the same in a worker and on the main thread. One decoder stays warm across seeks: setting
+`currentTime` to the next frame runs at the speed of the decoder itself, and seeking does not wait for a visible tab.
+MP4 and WebM are demuxed by [Mediabunny][Mediabunny] from HTTP byte ranges, so only the bytes that are needed are
+downloaded.
+
+```js
+import { CanvasVideoElement } from "html-video-element-webworker-polyfill/canvas-video";
+
+const video = new CanvasVideoElement({ canvas: offscreenCanvas });
+video.src = "movie.mp4";
+await new Promise((resolve) => video.addEventListener("loadeddata", resolve, { once: true }));
+
+for (let i = 0; i < frameCount; i++) {
+  video.currentTime = i / fps;
+  await new Promise((resolve) => video.addEventListener("seeked", resolve, { once: true }));
+  process(video.currentFrame);
+}
+```
+
+`video.currentFrame` is the [`VideoFrame`][VideoFrame] on screen; it belongs to the element, so `clone()` it to keep it.
+`play()` plays with sound through Web Audio. In a worker, create the audio output on the main thread and pass its port:
+
+```js
+import { createAudioOutput } from "html-video-element-webworker-polyfill/canvas-video";
+
+const audio = createAudioOutput();
+worker.postMessage({ audio: audio.port }, [audio.port]);
+```
+
+```js
+const video = new CanvasVideoElement({ audio: data.audio });
+```
+
+[Open the demo][demo-frames]
+
 ## Why not WebCodecs?
 
 [WebCodecs][WebCodecs] gives you a decoder, not a player: you demux containers yourself, configure codecs, feed chunks
@@ -124,6 +162,7 @@ frame-accurately. It just does not exist in workers. This package makes it avail
 | `html-video-element-webworker-polyfill/webgpu`       | `polyfillWebgpu()` — [`copyExternalImageToTexture`][copyExternalImageToTexture], [`importExternalTexture`][importExternalTexture]              |
 | `html-video-element-webworker-polyfill/image-bitmap` | `polyfillCreateImageBitmap()` — [`createImageBitmap`][createImageBitmap], `polyfillVideoFrame()` — [`new VideoFrame`][VideoFrame constructor]  |
 | `html-video-element-webworker-polyfill/auto`         | installs every worker polyfill                                                                                                                 |
+| `html-video-element-webworker-polyfill/canvas-video` | `CanvasVideoElement({ canvas?, audio?, readAhead?, frameQueueSize?, hardwareAcceleration?, requestInit? })`, `createAudioOutput()`             |
 
 The worker element implements the [`HTMLVideoElement`][HTMLVideoElement] API, plus `currentFrame` (the
 [`VideoFrame`][VideoFrame] on screen) and `dispose()`.
@@ -134,6 +173,8 @@ The worker element implements the [`HTMLVideoElement`][HTMLVideoElement] API, pl
 - The package shares the worker's `postMessage` channel with your code, so check your own messages, as in example 1.
 - Requires [`VideoFrame`][VideoFrame] and [`requestVideoFrameCallback`][requestVideoFrameCallback]: Chrome/Edge 94+,
   Firefox 132+, Safari 17+.
+- `CanvasVideoElement` plays only the codecs the browser's WebCodecs decoders support, and changes pitch with
+  `playbackRate` (`preservesPitch` is not supported).
 
 ## License
 
@@ -157,3 +198,5 @@ Apache-2.0
 [VideoFrame]: https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame
 [VideoFrame constructor]: https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame/VideoFrame
 [CORS]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS
+[Mediabunny]: https://mediabunny.dev/
+[demo-frames]: https://stepancar.github.io/html-video-element-webworker-polyfill/frames.html

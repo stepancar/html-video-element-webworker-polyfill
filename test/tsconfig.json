@@ -13,7 +13,8 @@
       "html-video-element-webworker-polyfill/webgl": ["../src/polyfills/webgl.ts"],
       "html-video-element-webworker-polyfill/webgpu": ["../src/polyfills/webgpu.ts"],
       "html-video-element-webworker-polyfill/image-bitmap": ["../src/polyfills/image-bitmap.ts"],
-      "html-video-element-webworker-polyfill/auto": ["../src/auto.ts"]
+      "html-video-element-webworker-polyfill/auto": ["../src/auto.ts"],
+      "html-video-element-webworker-polyfill/canvas-video": ["../src/canvas-video/index.ts"]
     }
   },
   "include": ["."]

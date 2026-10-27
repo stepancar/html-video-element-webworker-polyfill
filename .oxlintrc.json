@@ -41,7 +41,7 @@
       }
     },
     {
-      "files": ["src/worker/video-element.ts"],
+      "files": ["src/worker/video-element.ts", "src/canvas-video/element.ts"],
       "rules": {
         "typescript/no-unsafe-declaration-merging": "off"
       }

@@ -17,6 +17,7 @@ const ENTRIES: Record<string, string> = {
   "/webgpu": "polyfills/webgpu.ts",
   "/image-bitmap": "polyfills/image-bitmap.ts",
   "/auto": "auto.ts",
+  "/canvas-video": "canvas-video/index.ts",
 };
 
 export default defineConfig({

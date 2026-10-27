@@ -12,8 +12,19 @@ export default defineConfig({
       { find: /^html-video-element-webworker-polyfill\/worker$/, replacement: src("worker/index.ts") },
       { find: /^html-video-element-webworker-polyfill\/canvas2d$/, replacement: src("polyfills/canvas2d.ts") },
       { find: /^html-video-element-webworker-polyfill\/webgl$/, replacement: src("polyfills/webgl.ts") },
+      { find: /^html-video-element-webworker-polyfill\/canvas-video$/, replacement: src("canvas-video/index.ts") },
     ],
   },
   worker: { format: "es" },
-  build: { outDir: "dist", emptyOutDir: true, target: "es2022" },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    target: "es2022",
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL("index.html", import.meta.url)),
+        frames: fileURLToPath(new URL("frames.html", import.meta.url)),
+      },
+    },
+  },
 });
