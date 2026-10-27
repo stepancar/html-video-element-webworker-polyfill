@@ -1,6 +1,6 @@
 {
   "name": "html-video-element-webworker-polyfill",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "HTMLVideoElement inside Web Workers: a main-thread <video> mirrored into the worker with synchronous state, events and VideoFrames, Canvas 2D / WebGL / WebGPU polyfills, and CanvasVideoElement, a WebCodecs video element with fast frame stepping.",
   "keywords": [
     "canvas",
